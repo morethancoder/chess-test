@@ -2,6 +2,10 @@
 
 - **Perft runner**: `npm run perft` runs `node scripts/perft.ts` via Node's built-in
   TypeScript type stripping (Node ≥ 23.6; developed on Node 25). No extra dependency.
+  The script's own stdout is only the count; npm prints its usual `> chess-trainer perft`
+  header lines before it (use `npm run --silent perft -- ...` to drop them).
+- Screenshots: `node scripts/screenshots.mjs http://localhost:<port>` with a dev
+  server running writes 390/1280 × light/dark shots to `.playwright/` (gitignored).
 - **Puzzle answers**: on the *final* move of a puzzle, any checkmating move is
   accepted (a mate-in-1 can have more than one mate). Earlier moves in a mate-in-2
   must match the listed solution move, because the defender's reply is scripted.
