@@ -1,0 +1,56 @@
+{
+  "ms": 541862,
+  "status": "ok",
+  "pinned_model": "claude-opus-5-5",
+  "models_used": [
+    "claude-haiku-5-5",
+    "claude-opus-5-5",
+    "claude-sonnet-5-5"
+  ],
+  "parts": [
+    {
+      "model": "opus",
+      "ms": 451292,
+      "step": "build",
+      "session": "88939513-b489-445b-87e9-8e7ac8fc7e1f",
+      "total_cost_usd": 2.301426700000001,
+      "status": "ok",
+      "turns": 28,
+      "models_used": [
+        "claude-haiku-5-5",
+        "claude-opus-5-5",
+        "claude-sonnet-5-5"
+      ],
+      "denied": [
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash"
+      ],
+      "exit": 0
+    },
+    {
+      "model": "sonnet",
+      "ms": 90570,
+      "step": "check",
+      "session": "86d65130-03ee-4723-96df-7386aaf254be",
+      "total_cost_usd": 0.31920079999999995,
+      "status": "ok",
+      "turns": 33,
+      "models_used": [
+        "claude-sonnet-5-5"
+      ],
+      "denied": [
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash"
+      ],
+      "exit": 0
+    }
+  ]
+}

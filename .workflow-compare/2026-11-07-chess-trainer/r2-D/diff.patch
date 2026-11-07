@@ -1,0 +1,2375 @@
+diff --git a/CHECKLIST-REPORT.md b/CHECKLIST-REPORT.md
+new file mode 100644
+index 0000000..d9c0a82
+--- /dev/null
++++ b/CHECKLIST-REPORT.md
+@@ -0,0 +1,32 @@
++# Checklist pass
++
++(Named `CHECKLIST-REPORT.md`: on this case-insensitive filesystem `CHECKLIST.md` is the same file as the input `checklist.md`.)
++
++Checked against the code, the unit/e2e suites, and the running dev server (Playwright, 390 px dark and 1280 px light). No code changes were needed.
++
++| # | Result | Note |
++|---|--------|------|
++| 1 | met | Pass-and-play from the standard start (`src/ui/app.ts`, e2e plays a game). |
++| 2 | met | All 12 puzzles solved through the UI in a scripted run (mate-in-2 reply is automatic). Wrong move is flagged and retryable, `puzzle-solved` shown, Next puzzle button works. |
++| 3 | met | Moves go through the engine's legal-move list; e2e checks illegal moves are refused. |
++| 4 | met | Unit tests cover both sides, blocked, in/through/into check, lost rights. |
++| 5 | met | Unit tests: available right after the double step, expires, illegal if it exposes the king. |
++| 6 | met | Picker with q/r/b/n buttons; used in puzzle 11 and underpromotion e2e. |
++| 7 | met | King square gets a `check` class; "Check!" in the status line. |
++| 8 | met | Game-over dialog names checkmate winner or stalemate (e2e covers both). |
++| 9 | met | Unit tests for threefold and fifty-move; a UI run from a halfmove-100 FEN showed "Draw / Fifty-move rule" automatically. |
++| 10 | met | Pieces from `src/ui/pieces.ts` as inline SVG; no image files; CSS uses a system font stack only for UI text. |
++| 11 | met | `scrollWidth == innerWidth` at 390 and 1280 on play and all puzzle pages. Visual polish judged by the previous session's screenshots, not re-reviewed. |
++| 12 | met | `prefers-color-scheme: dark` variable set in `style.css`. |
++| 13 | met | Tap selects, targets get classes, second tap moves (e2e). |
++| 14 | met | Pointer-event drag; `touch-action: none`. Mouse drag in e2e; touch drag verified with CDP touch events (e2→e4). |
++| 15 | met | `selected` and `last` classes on squares. |
++| 16 | met | `tests/unit/perft.test.ts` has the given counts; passing. |
++| 17 | met | `tests/unit/rules.test.ts` has describe blocks for castling, en passant, promotion, check/mate/stalemate, draws. |
++| 18 | met | e2e solves puzzles and plays to checkmate. |
++| 19 | met | `npm test` (65 pass), `npm run e2e` (7 pass), `npm run build` pass; dev serves on `$PORT` (vite config). |
++| 20 | met (with caveat) | The script prints only the count. npm itself prints its two-line `> chess-trainer@0.0.0 perft` header unless run with `--silent`. A fix would be a project `.npmrc` with `loglevel=silent`; I was not permitted to create that file, so I left it. If the outside check uses `npm run`, it may need `--silent`. |
++| 21 | met | 64 `data-square` and 32 `data-piece` at start (`wK`, `bN` format). |
++| 22 | met | `?puzzle=n` run for 1–12; `?fen=` used in e2e; bad FEN falls back with a notice. |
++| 23 | met | `promotion` with `data-piece` buttons, `game-over`, `puzzle-solved` all present and exercised. |
++| 24 | met | Tests, e2e and build pass. No console errors or warnings across the 12 puzzles, play page and both viewports. |
+diff --git a/NOTES.md b/NOTES.md
+new file mode 100644
+index 0000000..aa99ccc
+--- /dev/null
++++ b/NOTES.md
+@@ -0,0 +1,28 @@
++# Notes: readings of unclear points in the brief
++
++- **Perft runner**: `npm run perft` runs `node scripts/perft.ts` via Node's built-in
++  TypeScript type stripping (Node ≥ 23.6; developed on Node 25). No extra dependency.
++  The script's own stdout is only the count; npm prints its usual `> chess-trainer perft`
++  header lines before it (use `npm run --silent perft -- ...` to drop them).
++- Screenshots: `node scripts/screenshots.mjs http://localhost:<port>` with a dev
++  server running writes 390/1280 × light/dark shots to `.playwright/` (gitignored).
++- **Puzzle answers**: on the *final* move of a puzzle, any checkmating move is
++  accepted (a mate-in-1 can have more than one mate). Earlier moves in a mate-in-2
++  must match the listed solution move, because the defender's reply is scripted.
++- **Wrong puzzle moves**: the move is taken back at once, the from/to squares are
++  tinted red and a message names the move. The player can try again straight away;
++  "Retry" resets the puzzle.
++- **Defender reply** in mate-in-2 is played automatically ~0.45 s after the correct
++  first move; the board is locked during that pause.
++- **Puzzle board orientation**: the side to move is at the bottom.
++- **Puzzle checkmate** shows `puzzle-solved`, not the game-over screen (game-over is
++  for the two-player game).
++- **`?fen=`**: an unreadable FEN falls back to the standard start with a notice.
++  "New game" always starts from the standard position (and drops `?fen` from the URL).
++- **`?puzzle=n`** out of range opens puzzle 1 with a notice. Switching puzzles updates
++  the URL (`?puzzle=n`) so back/forward work.
++- **Game-over screen** has "New game" and "View board"; Undo is available after game
++  over and reopens play.
++- Solved puzzles are remembered in `localStorage` (shown as tinted numbers).
++- Draws (threefold, fifty-move) are applied automatically, as the brief says; there is
++  no claim button.
+diff --git a/docs/design.md b/docs/design.md
+new file mode 100644
+index 0000000..68a88ac
+--- /dev/null
++++ b/docs/design.md
+@@ -0,0 +1,106 @@
++# Design spec
++
++## Module layout
++
++```
++src/
++  engine/
++    types.ts      Colour, PieceType, Piece, Square, Move, Position, GameStatus
++    board.ts      square <-> index helpers, FEN parse/serialise
++    movegen.ts    pseudo-legal + legal move generation, attack detection
++    game.ts       Game class: history, make/undo, status (mate, stalemate, draws)
++    perft.ts      perft(position, depth)
++    index.ts      re-exports the public API below
++  ui/
++    pieces.ts     original SVG piece drawings (code only)
++    board-view.ts board rendering, tap + drag input, highlights, promotion picker
++    app.ts        modes (play / puzzle), URL params, side panel, game-over
++  main.ts         entry: mounts app
++  style.css       theme variables, layout
++scripts/perft.ts  CLI: `npm run perft -- "<fen>" <depth>` prints only the count
++tests/unit/       vitest: perft + one or more tests per rule (brief 4-9)
++tests/e2e/        playwright: solve a puzzle, play to checkmate
++```
++
++Engine is pure TypeScript with no DOM access. All engine imports use explicit
++`.ts` extensions and erasable-only syntax (no enums, no parameter properties,
++no namespaces) so `node scripts/perft.ts` runs under Node's native type stripping
++(Node 25, no extra dependency).
++
++## Engine API
++
++```ts
++type Colour = 'w' | 'b';
++type PieceType = 'p' | 'n' | 'b' | 'r' | 'q' | 'k';
++interface Piece { colour: Colour; type: PieceType }
++type Square = string;                 // 'a1'..'h8'
++
++interface Move {
++  from: Square; to: Square;
++  piece: PieceType;
++  captured?: PieceType;
++  promotion?: 'q' | 'r' | 'b' | 'n';
++  flags: { castle?: 'k' | 'q'; enPassant?: boolean; doublePush?: boolean };
++  san: string;                         // e.g. "Nf3", "exd6", "O-O", "e8=Q+", "Qh5#"
++  uci: string;                         // e.g. "e2e4", "e7e8q"
++}
++
++type GameStatus =
++  | { state: 'playing'; check: boolean }
++  | { state: 'checkmate'; winner: Colour }
++  | { state: 'stalemate' }
++  | { state: 'draw'; reason: 'threefold' | 'fifty-move' };
++
++class Game {
++  constructor(fen?: string);            // default = standard start; throws on invalid FEN
++  fen(): string;
++  turn(): Colour;
++  board(): (Piece | null)[][];          // board()[rank 0..7 from rank 8 down][file 0..7 a..h]
++  get(sq: Square): Piece | null;
++  moves(from?: Square): Move[];         // legal moves (optionally from one square)
++  move(m: { from: Square; to: Square; promotion?: 'q'|'r'|'b'|'n' } | string): Move | null;
++                                        // string = UCI; returns null if illegal; promotion
++                                        // moves without a promotion piece are illegal
++  undo(): Move | null;
++  history(): Move[];
++  inCheck(): boolean;
++  kingSquare(c: Colour): Square;
++  status(): GameStatus;                 // checkmate/stalemate first, then 50-move
++                                        // (halfmove clock >= 100), then threefold
++  isGameOver(): boolean;
++}
++
++function perft(fen: string, depth: number): number;
++const START_FEN: string;
++```
++
++Repetition key = piece placement + side to move + castling rights + en-passant
++square (only when an en-passant capture is actually legal). The start position
++counts as the first occurrence.
++
++## Visual direction
++
++- **Board**: flat, quiet squares. Light theme: light `#eae4d6`, dark `#8a9a7b`
++  (sage green). Dark theme: light `#a7a89a`, dark `#4f5d4a`. Coordinates in
++  the corners of the edge squares, small, in the opposite square colour.
++- **Pieces**: original geometric SVGs drawn in code — rounded silhouettes built
++  from circles, rects and simple paths. White pieces: off-white fill
++  `#fbfaf6` with dark stroke `#2b2b2b`; black pieces: `#2b2b2b` fill with light
++  inner detail strokes. Stroke 1.6 in a 45×45 viewBox.
++- **Highlights**: selected square tinted amber; last move from/to tinted soft
++  yellow; legal targets as a centred dot (empty) or ring (capture); king in
++  check gets a red radial glow.
++- **Chrome**: system font stack, page background `#f6f4ef` / `#1b1d1f`,
++  panel cards with 12 px radius and a subtle border. One accent colour
++  (teal `#2f7d74` light, `#5fb3a8` dark) for buttons and the active mode tab.
++- **Layout 390 px**: single column. Header (title + mode tabs: Play / Puzzles),
++  board full width minus 16 px padding (≈358 px, squares ≈44.75 px),
++  then status line, then controls (New game / Undo / Flip, or puzzle
++  prev/next/retry) and move list underneath. No horizontal scroll.
++- **Layout 1280 px**: two columns centred, max width ~1040 px. Board
++  min(80vh, 640 px) square on the left, side panel 320 px on the right with
++  status, controls, move list (or puzzle info + puzzle list grid 1-12).
++- **Overlays**: promotion picker is a small card of four piece buttons anchored
++  over the board; game-over is a centred modal over the board with the result
++  and a "New game" button.
++- Themes follow `prefers-color-scheme` via CSS custom properties only.
+diff --git a/index.html b/index.html
+index 0bca02a..cd0d2bb 100644
+--- a/index.html
++++ b/index.html
+@@ -3,6 +3,8 @@
+   <head>
+     <meta charset="UTF-8" />
+     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
++    <meta name="color-scheme" content="light dark" />
++    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 8 8'%3E%3Crect width='8' height='8' fill='%23eae4d6'/%3E%3Cpath d='M0 0h4v4H0zM4 4h4v4H4z' fill='%238a9a7b'/%3E%3C/svg%3E" />
+     <title>Chess trainer</title>
+   </head>
+   <body>
+diff --git a/package.json b/package.json
+index ce53873..60e53bb 100644
+--- a/package.json
++++ b/package.json
+@@ -7,7 +7,8 @@
+     "dev": "vite",
+     "build": "tsc && vite build",
+     "preview": "vite preview",
+-    "test": "vitest run --passWithNoTests",
++    "perft": "node scripts/perft.ts",
++    "test":"vitest run --passWithNoTests",
+     "e2e": "playwright test --pass-with-no-tests"
+   },
+   "devDependencies": {
+diff --git a/scripts/perft.ts b/scripts/perft.ts
+new file mode 100644
+index 0000000..83fac73
+--- /dev/null
++++ b/scripts/perft.ts
+@@ -0,0 +1,9 @@
++import { perft } from '../src/engine/perft.ts';
++
++const [fen, depthArg] = process.argv.slice(2);
++const depth = Number(depthArg);
++if (!fen || !Number.isInteger(depth) || depth < 0) {
++  console.error('usage: npm run perft -- "<fen>" <depth>');
++  process.exit(1);
++}
++console.log(perft(fen, depth));
+diff --git a/scripts/screenshots.mjs b/scripts/screenshots.mjs
+new file mode 100644
+index 0000000..e292a94
+--- /dev/null
++++ b/scripts/screenshots.mjs
+@@ -0,0 +1,45 @@
++// Takes screenshots of a running dev server: node scripts/screenshots.mjs <baseURL>
++import { chromium } from '@playwright/test';
++
++const base = process.argv[2] || 'http://localhost:5173';
++const browser = await chromium.launch();
++const shots = [
++  ['play', '/', async () => {}],
++  ['play-moves', '/', async (p) => {
++    for (const [a, b] of [['e2', 'e4'], ['e7', 'e5'], ['g1', 'f3'], ['b8', 'c6'], ['f1', 'c4']]) {
++      await p.click(`[data-square="${a}"]`); await p.click(`[data-square="${b}"]`);
++    }
++    await p.click('[data-square="d7"]');
++  }],
++  ['mate', '/', async (p) => {
++    for (const [a, b] of [['f2', 'f3'], ['e7', 'e5'], ['g2', 'g4'], ['d8', 'h4']]) {
++      await p.click(`[data-square="${a}"]`); await p.click(`[data-square="${b}"]`);
++    }
++  }],
++  ['puzzle', '/?puzzle=7', async (p) => {
++    await p.click('[data-square="a5"]'); await p.click('[data-square="a6"]');
++  }],
++  ['promo', '/?puzzle=11', async (p) => {
++    await p.click('[data-square="g7"]'); await p.click('[data-square="g8"]');
++  }],
++];
++const errors = [];
++for (const scheme of ['light', 'dark']) {
++  for (const width of [390, 1280]) {
++    const ctx = await browser.newContext({ viewport: { width, height: width === 390 ? 844 : 800 }, colorScheme: scheme });
++    const page = await ctx.newPage();
++    page.on('console', (m) => m.type() === 'error' && errors.push(m.text()));
++    for (const [name, url, act] of shots) {
++      await page.goto(base + url);
++      await page.waitForSelector('[data-square]');
++      await act(page);
++      await page.waitForTimeout(150);
++      const sw = await page.evaluate(() => document.documentElement.scrollWidth);
++      if (sw > width) errors.push(`horizontal overflow ${name} ${width}: ${sw}`);
++      await page.screenshot({ path: `.playwright/${name}-${width}-${scheme}.png`, fullPage: true });
++    }
++    await ctx.close();
++  }
++}
++await browser.close();
++console.log(errors.length ? 'ERRORS:\n' + errors.join('\n') : 'no console errors, no overflow');
+diff --git a/src/engine/board.ts b/src/engine/board.ts
+new file mode 100644
+index 0000000..7b3b835
+--- /dev/null
++++ b/src/engine/board.ts
+@@ -0,0 +1,106 @@
++import type { Colour, Piece, PieceType, Position, Square } from './types.ts';
++
++export const START_FEN = 'rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1';
++
++export const TYPE_LETTERS = ' pnbrqk';
++
++export function sqToIdx(sq: Square): number {
++  if (!/^[a-h][1-8]$/.test(sq)) return -1;
++  return (8 - (sq.charCodeAt(1) - 48)) * 8 + (sq.charCodeAt(0) - 97);
++}
++
++export function idxToSq(i: number): Square {
++  return String.fromCharCode(97 + (i & 7)) + String(8 - (i >> 3));
++}
++
++export function codeToPiece(code: number): Piece | null {
++  if (code === 0) return null;
++  const colour: Colour = code > 0 ? 'w' : 'b';
++  return { colour, type: TYPE_LETTERS[Math.abs(code)] as PieceType };
++}
++
++export function parseFen(fen: string): Position {
++  if (typeof fen !== 'string') throw new Error('Invalid FEN');
++  const f = fen.trim().split(/\s+/);
++  if (f.length < 4 || f.length > 6) throw new Error(`Invalid FEN: ${fen}`);
++  const rows = f[0].split('/');
++  if (rows.length !== 8) throw new Error('Invalid FEN: need 8 ranks');
++  const board = new Int8Array(64);
++  const kings: [number, number] = [-1, -1];
++  const kingCount = [0, 0];
++  for (let r = 0; r < 8; r++) {
++    let file = 0;
++    for (const ch of rows[r]) {
++      if (ch >= '1' && ch <= '8') {
++        file += ch.charCodeAt(0) - 48;
++        continue;
++      }
++      const t = TYPE_LETTERS.indexOf(ch.toLowerCase());
++      if (t < 1 || file > 7) throw new Error(`Invalid FEN piece placement: ${f[0]}`);
++      if (t === 1 && (r === 0 || r === 7)) throw new Error('Invalid FEN: pawn on back rank');
++      const white = ch === ch.toUpperCase();
++      board[r * 8 + file] = white ? t : -t;
++      if (t === 6) {
++        kings[white ? 0 : 1] = r * 8 + file;
++        kingCount[white ? 0 : 1]++;
++      }
++      file++;
++    }
++    if (file !== 8) throw new Error(`Invalid FEN rank: ${rows[r]}`);
++  }
++  if (kingCount[0] !== 1 || kingCount[1] !== 1) throw new Error('Invalid FEN: need one king per side');
++  if (f[1] !== 'w' && f[1] !== 'b') throw new Error('Invalid FEN: side to move');
++  if (!/^(-|[KQkq]+)$/.test(f[2])) throw new Error('Invalid FEN: castling');
++  let castling = 0;
++  if (f[2].includes('K')) castling |= 1;
++  if (f[2].includes('Q')) castling |= 2;
++  if (f[2].includes('k')) castling |= 4;
++  if (f[2].includes('q')) castling |= 8;
++  // drop rights that are impossible given the piece placement
++  if (board[60] !== 6) castling &= ~3;
++  if (board[63] !== 4) castling &= ~1;
++  if (board[56] !== 4) castling &= ~2;
++  if (board[4] !== -6) castling &= ~12;
++  if (board[7] !== -4) castling &= ~4;
++  if (board[0] !== -4) castling &= ~8;
++  let ep = -1;
++  if (f[3] !== '-') {
++    if (!/^[a-h][36]$/.test(f[3])) throw new Error('Invalid FEN: en passant');
++    ep = sqToIdx(f[3]);
++  }
++  const halfmove = f[4] === undefined ? 0 : Number(f[4]);
++  const fullmove = f[5] === undefined ? 1 : Number(f[5]);
++  if (!Number.isInteger(halfmove) || halfmove < 0 || !Number.isInteger(fullmove) || fullmove < 1) {
++    throw new Error('Invalid FEN: move counters');
++  }
++  return { board, turn: f[1] === 'w' ? 1 : -1, castling, ep, halfmove, fullmove, kings };
++}
++
++export function toFen(pos: Position): string {
++  const rows: string[] = [];
++  for (let r = 0; r < 8; r++) {
++    let s = '';
++    let empty = 0;
++    for (let c = 0; c < 8; c++) {
++      const v = pos.board[r * 8 + c];
++      if (v === 0) {
++        empty++;
++        continue;
++      }
++      if (empty) s += empty;
++      empty = 0;
++      const ch = TYPE_LETTERS[Math.abs(v)];
++      s += v > 0 ? ch.toUpperCase() : ch;
++    }
++    if (empty) s += empty;
++    rows.push(s);
++  }
++  const c =
++    (pos.castling & 1 ? 'K' : '') +
++    (pos.castling & 2 ? 'Q' : '') +
++    (pos.castling & 4 ? 'k' : '') +
++    (pos.castling & 8 ? 'q' : '');
++  return `${rows.join('/')} ${pos.turn === 1 ? 'w' : 'b'} ${c || '-'} ${
++    pos.ep >= 0 ? idxToSq(pos.ep) : '-'
++  } ${pos.halfmove} ${pos.fullmove}`;
++}
+diff --git a/src/engine/game.ts b/src/engine/game.ts
+new file mode 100644
+index 0000000..3dfaa76
+--- /dev/null
++++ b/src/engine/game.ts
+@@ -0,0 +1,192 @@
++import { START_FEN, TYPE_LETTERS, codeToPiece, idxToSq, parseFen, sqToIdx, toFen } from './board.ts';
++import { inCheck, isAttacked, legalMoves, makeMove, unmakeMove } from './movegen.ts';
++import type {
++  Colour,
++  GameStatus,
++  Move,
++  Piece,
++  PieceType,
++  Position,
++  PromotionPiece,
++  RawMove,
++  Square,
++  Undo,
++} from './types.ts';
++
++interface HistoryEntry {
++  raw: RawMove;
++  undo: Undo;
++  move: Move;
++}
++
++export class Game {
++  private pos: Position;
++  private hist: HistoryEntry[] = [];
++  private keys: string[] = [];
++
++  constructor(fen: string = START_FEN) {
++    this.pos = parseFen(fen);
++    // the side that just moved must not be in check
++    const mover = (-this.pos.turn) as 1 | -1;
++    const moverIdx = mover === 1 ? 0 : 1;
++    const otherKing = this.pos.kings[moverIdx];
++    if (isAttacked(this.pos, otherKing, this.pos.turn)) {
++      throw new Error('Invalid FEN: side not to move is in check');
++    }
++    this.keys.push(this.key());
++  }
++
++  private key(): string {
++    const p = this.pos;
++    let ep = '-';
++    if (p.ep >= 0 && legalMoves(p).some((m) => m.flags & 2)) ep = idxToSq(p.ep);
++    return `${toFen(p).split(' ')[0]} ${p.turn} ${p.castling} ${ep}`;
++  }
++
++  fen(): string {
++    return toFen(this.pos);
++  }
++
++  turn(): Colour {
++    return this.pos.turn === 1 ? 'w' : 'b';
++  }
++
++  board(): (Piece | null)[][] {
++    const rows: (Piece | null)[][] = [];
++    for (let r = 0; r < 8; r++) {
++      const row: (Piece | null)[] = [];
++      for (let f = 0; f < 8; f++) row.push(codeToPiece(this.pos.board[r * 8 + f]));
++      rows.push(row);
++    }
++    return rows;
++  }
++
++  get(sq: Square): Piece | null {
++    const i = sqToIdx(sq);
++    return i < 0 ? null : codeToPiece(this.pos.board[i]);
++  }
++
++  private toMove(raw: RawMove, legal: RawMove[]): Move {
++    const pos = this.pos;
++    const letter = TYPE_LETTERS[raw.piece];
++    const from = idxToSq(raw.from);
++    const to = idxToSq(raw.to);
++    let san: string;
++    if (raw.flags & 4) san = 'O-O';
++    else if (raw.flags & 8) san = 'O-O-O';
++    else {
++      san = '';
++      if (raw.piece === 1) {
++        if (raw.captured) san += from[0];
++      } else {
++        san += letter.toUpperCase();
++        const others = legal.filter(
++          (m) => m.piece === raw.piece && m.to === raw.to && m.from !== raw.from,
++        );
++        if (others.length) {
++          const sameFile = others.some((m) => (m.from & 7) === (raw.from & 7));
++          const sameRank = others.some((m) => m.from >> 3 === raw.from >> 3);
++          if (!sameFile) san += from[0];
++          else if (!sameRank) san += from[1];
++          else san += from;
++        }
++      }
++      if (raw.captured) san += 'x';
++      san += to;
++      if (raw.promo) san += '=' + TYPE_LETTERS[raw.promo].toUpperCase();
++    }
++    const u = makeMove(pos, raw);
++    if (inCheck(pos)) san += legalMoves(pos).length === 0 ? '#' : '+';
++    unmakeMove(pos, raw, u);
++
++    const move: Move = {
++      from,
++      to,
++      piece: letter as PieceType,
++      flags: {},
++      san,
++      uci: from + to + (raw.promo ? TYPE_LETTERS[raw.promo] : ''),
++    };
++    if (raw.captured) move.captured = TYPE_LETTERS[raw.captured] as PieceType;
++    if (raw.promo) move.promotion = TYPE_LETTERS[raw.promo] as PromotionPiece;
++    if (raw.flags & 4) move.flags.castle = 'k';
++    if (raw.flags & 8) move.flags.castle = 'q';
++    if (raw.flags & 2) move.flags.enPassant = true;
++    if (raw.flags & 1) move.flags.doublePush = true;
++    return move;
++  }
++
++  moves(from?: Square): Move[] {
++    const legal = legalMoves(this.pos);
++    const fi = from === undefined ? -1 : sqToIdx(from);
++    if (from !== undefined && fi < 0) return [];
++    return legal.filter((m) => fi < 0 || m.from === fi).map((m) => this.toMove(m, legal));
++  }
++
++  move(m: { from: Square; to: Square; promotion?: PromotionPiece } | string): Move | null {
++    let from: string;
++    let to: string;
++    let promotion: string | undefined;
++    if (typeof m === 'string') {
++      const match = /^([a-h][1-8])([a-h][1-8])([qrbn])?$/.exec(m);
++      if (!match) return null;
++      from = match[1];
++      to = match[2];
++      promotion = match[3];
++    } else if (m && typeof m === 'object') {
++      from = m.from;
++      to = m.to;
++      promotion = m.promotion;
++    } else return null;
++    const fi = sqToIdx(from);
++    const ti = sqToIdx(to);
++    if (fi < 0 || ti < 0) return null;
++    const promo = promotion === undefined ? 0 : 'pnbrqk'.indexOf(promotion) + 1;
++    if (promotion !== undefined && (promo < 2 || promo > 5)) return null;
++    const legal = legalMoves(this.pos);
++    const raw = legal.find((r) => r.from === fi && r.to === ti && r.promo === promo);
++    if (!raw) return null;
++    const move = this.toMove(raw, legal);
++    const undo = makeMove(this.pos, raw);
++    this.hist.push({ raw, undo, move });
++    this.keys.push(this.key());
++    return move;
++  }
++
++  undo(): Move | null {
++    const h = this.hist.pop();
++    if (!h) return null;
++    this.keys.pop();
++    unmakeMove(this.pos, h.raw, h.undo);
++    return h.move;
++  }
++
++  history(): Move[] {
++    return this.hist.map((h) => h.move);
++  }
++
++  inCheck(): boolean {
++    return inCheck(this.pos);
++  }
++
++  kingSquare(c: Colour): Square {
++    return idxToSq(this.pos.kings[c === 'w' ? 0 : 1]);
++  }
++
++  status(): GameStatus {
++    const check = inCheck(this.pos);
++    if (legalMoves(this.pos).length === 0) {
++      return check ? { state: 'checkmate', winner: this.pos.turn === 1 ? 'b' : 'w' } : { state: 'stalemate' };
++    }
++    if (this.pos.halfmove >= 100) return { state: 'draw', reason: 'fifty-move' };
++    const cur = this.keys[this.keys.length - 1];
++    let n = 0;
++    for (const k of this.keys) if (k === cur) n++;
++    if (n >= 3) return { state: 'draw', reason: 'threefold' };
++    return { state: 'playing', check };
++  }
++
++  isGameOver(): boolean {
++    return this.status().state !== 'playing';
++  }
++}
+diff --git a/src/engine/index.ts b/src/engine/index.ts
+new file mode 100644
+index 0000000..65be3dd
+--- /dev/null
++++ b/src/engine/index.ts
+@@ -0,0 +1,4 @@
++export type { Colour, PieceType, Piece, Square, Move, GameStatus } from './types.ts';
++export { Game } from './game.ts';
++export { perft } from './perft.ts';
++export { START_FEN } from './board.ts';
+diff --git a/src/engine/movegen.ts b/src/engine/movegen.ts
+new file mode 100644
+index 0000000..a62c8e6
+--- /dev/null
++++ b/src/engine/movegen.ts
+@@ -0,0 +1,241 @@
++import type { Position, RawMove, Undo } from './types.ts';
++
++const KNIGHT_D = [
++  [-2, -1], [-2, 1], [-1, -2], [-1, 2], [1, -2], [1, 2], [2, -1], [2, 1],
++];
++const KING_D = [
++  [-1, 0], [1, 0], [0, -1], [0, 1], [-1, -1], [-1, 1], [1, -1], [1, 1],
++];
++
++function build(deltas: number[][]): number[][] {
++  const out: number[][] = [];
++  for (let i = 0; i < 64; i++) {
++    const r = i >> 3;
++    const f = i & 7;
++    const list: number[] = [];
++    for (const [dr, df] of deltas) {
++      const nr = r + dr;
++      const nf = f + df;
++      if (nr >= 0 && nr < 8 && nf >= 0 && nf < 8) list.push(nr * 8 + nf);
++    }
++    out.push(list);
++  }
++  return out;
++}
++
++const KNIGHT = build(KNIGHT_D);
++const KING = build(KING_D);
++// index 0 = white pawn attacks (towards rank 8 = lower index), 1 = black
++const PAWN_ATT = [build([[-1, -1], [-1, 1]]), build([[1, -1], [1, 1]])];
++
++// RAYS[sq][dir]: dirs 0-3 orthogonal, 4-7 diagonal
++const RAYS: number[][][] = [];
++for (let i = 0; i < 64; i++) {
++  const dirs: number[][] = [];
++  for (const [dr, df] of KING_D) {
++    const ray: number[] = [];
++    let r = (i >> 3) + dr;
++    let f = (i & 7) + df;
++    while (r >= 0 && r < 8 && f >= 0 && f < 8) {
++      ray.push(r * 8 + f);
++      r += dr;
++      f += df;
++    }
++    dirs.push(ray);
++  }
++  RAYS.push(dirs);
++}
++
++const CASTLE_MASK = new Int8Array(64).fill(15);
++CASTLE_MASK[60] = 12;
++CASTLE_MASK[63] = 14;
++CASTLE_MASK[56] = 13;
++CASTLE_MASK[4] = 3;
++CASTLE_MASK[7] = 11;
++CASTLE_MASK[0] = 7;
++
++/** Is square `sq` attacked by side `by` (1 white, -1 black)? */
++export function isAttacked(pos: Position, sq: number, by: 1 | -1): boolean {
++  const b = pos.board;
++  // pawns of colour `by` attack sq from where an opposite-colour pawn on sq would attack
++  for (const t of PAWN_ATT[by === 1 ? 1 : 0][sq]) if (b[t] === by) return true;
++  for (const t of KNIGHT[sq]) if (b[t] === 2 * by) return true;
++  for (const t of KING[sq]) if (b[t] === 6 * by) return true;
++  const rays = RAYS[sq];
++  for (let d = 0; d < 8; d++) {
++    const ray = rays[d];
++    for (let k = 0; k < ray.length; k++) {
++      const v = b[ray[k]];
++      if (v === 0) continue;
++      if (v * by > 0) {
++        const t = v * by;
++        if (t === 5 || (d < 4 ? t === 4 : t === 3)) return true;
++      }
++      break;
++    }
++  }
++  return false;
++}
++
++export function inCheck(pos: Position): boolean {
++  return isAttacked(pos, pos.kings[pos.turn === 1 ? 0 : 1], (-pos.turn) as 1 | -1);
++}
++
++function add(out: RawMove[], from: number, to: number, piece: number, captured: number, promo: number, flags: number) {
++  out.push({ from, to, piece, captured, promo, flags });
++}
++
++export function pseudoMoves(pos: Position): RawMove[] {
++  const out: RawMove[] = [];
++  const b = pos.board;
++  const c = pos.turn;
++  const ci = c === 1 ? 0 : 1;
++  for (let i = 0; i < 64; i++) {
++    const v = b[i];
++    if (v * c <= 0) continue;
++    const t = v * c;
++    if (t === 1) {
++      const fwd = i + (c === 1 ? -8 : 8);
++      const lastRow = c === 1 ? 0 : 7;
++      const startRow = c === 1 ? 6 : 1;
++      if (b[fwd] === 0) {
++        if (fwd >> 3 === lastRow) {
++          for (let p = 5; p >= 2; p--) add(out, i, fwd, 1, 0, p, 0);
++        } else {
++          add(out, i, fwd, 1, 0, 0, 0);
++          const fwd2 = fwd + (fwd - i);
++          if (i >> 3 === startRow && b[fwd2] === 0) add(out, i, fwd2, 1, 0, 0, 1);
++        }
++      }
++      for (const to of PAWN_ATT[ci][i]) {
++        const tv = b[to];
++        if (tv * c < 0) {
++          if (to >> 3 === lastRow) {
++            for (let p = 5; p >= 2; p--) add(out, i, to, 1, -tv * c, p, 0);
++          } else add(out, i, to, 1, -tv * c, 0, 0);
++        } else if (tv === 0 && to === pos.ep) {
++          add(out, i, to, 1, 1, 0, 2);
++        }
++      }
++    } else if (t === 2 || t === 6) {
++      for (const to of t === 2 ? KNIGHT[i] : KING[i]) {
++        const tv = b[to];
++        if (tv * c <= 0) add(out, i, to, t, -tv * c, 0, 0);
++      }
++    } else {
++      const rays = RAYS[i];
++      const d0 = t === 3 ? 4 : 0;
++      const d1 = t === 4 ? 4 : 8;
++      for (let d = d0; d < d1; d++) {
++        for (const sq of rays[d]) {
++          const tv = b[sq];
++          if (tv === 0) add(out, i, sq, t, 0, 0, 0);
++          else {
++            if (tv * c < 0) add(out, i, sq, t, -tv * c, 0, 0);
++            break;
++          }
++        }
++      }
++    }
++  }
++  // castling
++  const opp = (-c) as 1 | -1;
++  const home = c === 1 ? 60 : 4;
++  if (b[home] === 6 * c && pos.castling & (c === 1 ? 3 : 12) && !isAttacked(pos, home, opp)) {
++    if (
++      pos.castling & (c === 1 ? 1 : 4) &&
++      b[home + 3] === 4 * c &&
++      b[home + 1] === 0 &&
++      b[home + 2] === 0 &&
++      !isAttacked(pos, home + 1, opp) &&
++      !isAttacked(pos, home + 2, opp)
++    ) {
++      add(out, home, home + 2, 6, 0, 0, 4);
++    }
++    if (
++      pos.castling & (c === 1 ? 2 : 8) &&
++      b[home - 4] === 4 * c &&
++      b[home - 1] === 0 &&
++      b[home - 2] === 0 &&
++      b[home - 3] === 0 &&
++      !isAttacked(pos, home - 1, opp) &&
++      !isAttacked(pos, home - 2, opp)
++    ) {
++      add(out, home, home - 2, 6, 0, 0, 8);
++    }
++  }
++  return out;
++}
++
++export function makeMove(pos: Position, m: RawMove): Undo {
++  const undo: Undo = { castling: pos.castling, ep: pos.ep, halfmove: pos.halfmove, fullmove: pos.fullmove };
++  const b = pos.board;
++  const c = pos.turn;
++  b[m.from] = 0;
++  b[m.to] = (m.promo || m.piece) * c;
++  if (m.flags & 2) b[m.to + (c === 1 ? 8 : -8)] = 0;
++  else if (m.flags & 4) {
++    b[m.to + 1] = 0;
++    b[m.to - 1] = 4 * c;
++  } else if (m.flags & 8) {
++    b[m.to - 2] = 0;
++    b[m.to + 1] = 4 * c;
++  }
++  if (m.piece === 6) pos.kings[c === 1 ? 0 : 1] = m.to;
++  pos.castling &= CASTLE_MASK[m.from] & CASTLE_MASK[m.to];
++  pos.ep = m.flags & 1 ? (m.from + m.to) >> 1 : -1;
++  pos.halfmove = m.piece === 1 || m.captured ? 0 : pos.halfmove + 1;
++  if (c === -1) pos.fullmove++;
++  pos.turn = (-c) as 1 | -1;
++  return undo;
++}
++
++export function unmakeMove(pos: Position, m: RawMove, u: Undo): void {
++  const b = pos.board;
++  const c = (-pos.turn) as 1 | -1; // the mover
++  pos.turn = c;
++  b[m.from] = m.piece * c;
++  if (m.flags & 2) {
++    b[m.to] = 0;
++    b[m.to + (c === 1 ? 8 : -8)] = -c;
++  } else {
++    b[m.to] = m.captured ? -m.captured * c : 0;
++    if (m.flags & 4) {
++      b[m.to + 1] = 4 * c;
++      b[m.to - 1] = 0;
++    } else if (m.flags & 8) {
++      b[m.to - 2] = 4 * c;
++      b[m.to + 1] = 0;
++    }
++  }
++  if (m.piece === 6) pos.kings[c === 1 ? 0 : 1] = m.from;
++  pos.castling = u.castling;
++  pos.ep = u.ep;
++  pos.halfmove = u.halfmove;
++  pos.fullmove = u.fullmove;
++}
++
++export function legalMoves(pos: Position): RawMove[] {
++  const c = pos.turn;
++  const ki = c === 1 ? 0 : 1;
++  const out: RawMove[] = [];
++  for (const m of pseudoMoves(pos)) {
++    const u = makeMove(pos, m);
++    if (!isAttacked(pos, pos.kings[ki], (-c) as 1 | -1)) out.push(m);
++    unmakeMove(pos, m, u);
++  }
++  return out;
++}
++
++export function perftCount(pos: Position, depth: number): number {
++  if (depth === 0) return 1;
++  const moves = legalMoves(pos);
++  if (depth === 1) return moves.length;
++  let n = 0;
++  for (const m of moves) {
++    const u = makeMove(pos, m);
++    n += perftCount(pos, depth - 1);
++    unmakeMove(pos, m, u);
++  }
++  return n;
++}
+diff --git a/src/engine/perft.ts b/src/engine/perft.ts
+new file mode 100644
+index 0000000..49b0f4a
+--- /dev/null
++++ b/src/engine/perft.ts
+@@ -0,0 +1,6 @@
++import { parseFen } from './board.ts';
++import { perftCount } from './movegen.ts';
++
++export function perft(fen: string, depth: number): number {
++  return perftCount(parseFen(fen), depth);
++}
+diff --git a/src/engine/types.ts b/src/engine/types.ts
+new file mode 100644
+index 0000000..61d13dd
+--- /dev/null
++++ b/src/engine/types.ts
+@@ -0,0 +1,56 @@
++export type Colour = 'w' | 'b';
++export type PieceType = 'p' | 'n' | 'b' | 'r' | 'q' | 'k';
++export interface Piece {
++  colour: Colour;
++  type: PieceType;
++}
++export type Square = string; // 'a1'..'h8'
++export type PromotionPiece = 'q' | 'r' | 'b' | 'n';
++
++export interface Move {
++  from: Square;
++  to: Square;
++  piece: PieceType;
++  captured?: PieceType;
++  promotion?: PromotionPiece;
++  flags: { castle?: 'k' | 'q'; enPassant?: boolean; doublePush?: boolean };
++  san: string;
++  uci: string;
++}
++
++export type GameStatus =
++  | { state: 'playing'; check: boolean }
++  | { state: 'checkmate'; winner: Colour }
++  | { state: 'stalemate' }
++  | { state: 'draw'; reason: 'threefold' | 'fifty-move' };
++
++/**
++ * Internal mutable position. Board index 0 = a8, 63 = h1.
++ * Cell values: 0 empty, +1..+6 white p,n,b,r,q,k, -1..-6 black.
++ */
++export interface Position {
++  board: Int8Array;
++  turn: 1 | -1; // 1 = white
++  castling: number; // bits: 1 K, 2 Q, 4 k, 8 q
++  ep: number; // en-passant target index or -1
++  halfmove: number;
++  fullmove: number;
++  kings: [number, number]; // [white, black] king indices
++}
++
++/** Internal move. flags: 1 double push, 2 en passant, 4 O-O, 8 O-O-O */
++export interface RawMove {
++  from: number;
++  to: number;
++  piece: number; // 1..6
++  captured: number; // 0..6
++  promo: number; // 0 or 2..5
++  flags: number;
++}
++
++export interface Undo {
++  castling: number;
++  ep: number;
++  halfmove: number;
++  fullmove: number;
++}
+diff --git a/src/main.ts b/src/main.ts
+index 67aeb67..1b067b1 100644
+--- a/src/main.ts
++++ b/src/main.ts
+@@ -1,2 +1,5 @@
+-// Entry point. The app is built here.
+-export {};
++import './style.css';
++import { App } from './ui/app.ts';
++
++const root = document.getElementById('app');
++if (root) void new App(root).start();
+diff --git a/src/style.css b/src/style.css
+new file mode 100644
+index 0000000..11bd2a1
+--- /dev/null
++++ b/src/style.css
+@@ -0,0 +1,230 @@
++:root {
++  color-scheme: light dark;
++  --bg: #f6f4ef;
++  --surface: #ffffff;
++  --border: #e3ded3;
++  --text: #22231f;
++  --muted: #6b6a63;
++  --accent: #2f7d74;
++  --accent-text: #ffffff;
++  --accent-soft: rgba(47, 125, 116, 0.12);
++  --sq-light: #eae4d6;
++  --sq-dark: #8a9a7b;
++  --coord-on-light: #6f7d61;
++  --coord-on-dark: #f1ecdf;
++  --last: rgba(244, 213, 90, 0.55);
++  --selected: rgba(240, 167, 50, 0.7);
++  --target: rgba(30, 40, 30, 0.28);
++  --wrong: rgba(214, 64, 52, 0.55);
++  --check: rgba(225, 45, 35, 0.95);
++  --danger: #b6382d;
++  --good: #24785a;
++  --shadow: 0 1px 2px rgba(30, 25, 10, 0.06), 0 6px 24px rgba(30, 25, 10, 0.07);
++  --piece-w-fill: #fbfaf6;
++  --piece-w-stroke: #2b2b2b;
++  --piece-b-fill: #2c2c2e;
++  --piece-b-stroke: #141414;
++  --piece-b-detail: #d9d6cc;
++  --radius: 12px;
++  font-family: ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
++  color: var(--text);
++  background: var(--bg);
++}
++
++@media (prefers-color-scheme: dark) {
++  :root {
++    --bg: #1b1d1f;
++    --surface: #24272a;
++    --border: #363a3e;
++    --text: #ebeae5;
++    --muted: #a3a49c;
++    --accent: #5fb3a8;
++    --accent-text: #0f1d1b;
++    --accent-soft: rgba(95, 179, 168, 0.16);
++    --sq-light: #a7a89a;
++    --sq-dark: #63735b;
++    --coord-on-light: #55634f;
++    --coord-on-dark: #c9cabd;
++    --last: rgba(226, 196, 80, 0.5);
++    --selected: rgba(240, 167, 50, 0.65);
++    --target: rgba(10, 15, 10, 0.4);
++    --danger: #ff8a7e;
++    --good: #6fd3a8;
++    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 8px 28px rgba(0, 0, 0, 0.3);
++  }
++}
++
++* { box-sizing: border-box; }
++html, body { margin: 0; }
++body { min-height: 100vh; overflow-x: hidden; -webkit-tap-highlight-color: transparent; }
++
++#app {
++  max-width: 1080px;
++  margin: 0 auto;
++  padding: 12px 16px 32px;
++}
++
++/* ---------- header ---------- */
++.top {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 12px;
++  padding: 4px 0 14px;
++}
++.brand { display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 1.1rem; letter-spacing: -0.01em; }
++.brand-mark { width: 30px; height: 30px; display: inline-grid; place-items: center; background: var(--sq-dark); border-radius: 8px; }
++.brand-mark svg { width: 26px; height: 26px; }
++
++.tabs { display: flex; gap: 4px; background: var(--surface); border: 1px solid var(--border); padding: 3px; border-radius: 999px; }
++.tab {
++  border: 0; background: transparent; color: var(--muted); font: inherit; font-weight: 600; font-size: 0.9rem;
++  padding: 7px 16px; border-radius: 999px; cursor: pointer;
++}
++.tab[aria-pressed='true'] { background: var(--accent); color: var(--accent-text); }
++.tab:focus-visible, .btn:focus-visible, .pz:focus-visible, .promotion button:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
++
++.banner {
++  margin: 0 0 12px; padding: 10px 14px; border-radius: var(--radius);
++  background: var(--accent-soft); color: var(--text); font-size: 0.9rem;
++}
++.banner[hidden] { display: none; }
++
++/* ---------- layout ---------- */
++.layout { display: grid; gap: 16px; grid-template-columns: 1fr; }
++.board-col { min-width: 0; }
++
++@media (min-width: 900px) {
++  .layout { grid-template-columns: auto 320px; align-items: start; justify-content: center; gap: 28px; }
++}
++
++/* ---------- board ---------- */
++.board-wrap {
++  position: relative;
++  width: 100%;
++  max-width: 640px;
++  margin: 0 auto;
++  aspect-ratio: 1;
++  border-radius: 8px;
++  overflow: hidden;
++  box-shadow: var(--shadow);
++}
++@media (min-width: 900px) {
++  .board-wrap { width: min(640px, calc(100vh - 110px)); min-width: 420px; }
++}
++.board {
++  display: grid;
++  grid-template-columns: repeat(8, 1fr);
++  grid-template-rows: repeat(8, 1fr);
++  width: 100%; height: 100%;
++  touch-action: none;
++  user-select: none;
++  -webkit-user-select: none;
++}
++.sq { position: relative; display: grid; place-items: center; cursor: default; }
++.sq.light { background: var(--sq-light); }
++.sq.dark { background: var(--sq-dark); }
++.sq.last::before, .sq.selected::before, .sq.wrong::before { content: ''; position: absolute; inset: 0; }
++.sq.last::before { background: var(--last); }
++.sq.selected::before { background: var(--selected); }
++.sq.wrong::before { background: var(--wrong); }
++.sq.check .piece { background: radial-gradient(circle, var(--check) 0%, rgba(225, 45, 35, 0.5) 40%, transparent 72%); border-radius: 50%; }
++.sq.target::after {
++  content: ''; position: absolute; width: 30%; height: 30%; border-radius: 50%; background: var(--target); pointer-events: none;
++}
++.sq.target-capture::after {
++  content: ''; position: absolute; inset: 5%; border-radius: 50%; border: 0.4em solid var(--target); pointer-events: none;
++}
++.sq.target, .sq.target-capture, .sq:has(.piece) { cursor: pointer; }
++.coord { position: absolute; font-size: clamp(8px, 1.6vw, 11px); font-weight: 700; line-height: 1; pointer-events: none; z-index: 1; }
++.coord.rank { top: 3px; left: 3px; }
++.coord.file { bottom: 3px; right: 4px; }
++.sq.light .coord { color: var(--coord-on-light); }
++.sq.dark .coord { color: var(--coord-on-dark); }
++.piece { position: relative; width: 100%; height: 100%; z-index: 2; pointer-events: none; }
++.piece.dragging-src { opacity: 0.3; }
++.piece-svg { display: block; width: 100%; height: 100%; }
++.drag-ghost { position: fixed; left: 0; top: 0; pointer-events: none; z-index: 100; filter: drop-shadow(0 6px 8px rgba(0, 0, 0, 0.35)); }
++.drag-ghost .piece-svg { transform: scale(1.12); }
++
++.pw { fill: var(--piece-w-fill); stroke: var(--piece-w-stroke); }
++.pb { fill: var(--piece-b-fill); stroke: var(--piece-b-stroke); }
++.piece-svg { stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; }
++.pw .d { stroke: var(--piece-w-stroke); }
++.pb .d { stroke: var(--piece-b-detail); stroke-width: 1.3; }
++.pw .eye { fill: var(--piece-w-stroke); stroke: none; }
++.pb .eye { fill: var(--piece-b-detail); stroke: none; }
++
++/* ---------- overlay: promotion + game over ---------- */
++.board-overlay { position: absolute; inset: 0; display: none; place-items: center; z-index: 10; background: rgba(15, 15, 12, 0.35); }
++.board-overlay.open { display: grid; }
++.promotion, .game-over {
++  background: var(--surface); color: var(--text); border-radius: var(--radius); box-shadow: var(--shadow);
++  border: 1px solid var(--border); padding: 16px 18px; text-align: center; max-width: calc(100% - 32px);
++}
++.promotion p { margin: 0 0 10px; font-weight: 600; }
++.promo-row { display: flex; gap: 8px; justify-content: center; }
++.promotion button[data-piece] {
++  width: 64px; height: 64px; padding: 4px; border-radius: 10px; border: 1px solid var(--border);
++  background: var(--sq-light); cursor: pointer;
++}
++.promotion button[data-piece]:hover { border-color: var(--accent); background: var(--accent-soft); }
++.promo-cancel { margin-top: 10px; border: 0; background: none; color: var(--muted); font: inherit; font-size: 0.85rem; cursor: pointer; text-decoration: underline; }
++.game-over { min-width: 230px; }
++.game-over h2 { margin: 0 0 4px; font-size: 1.5rem; letter-spacing: -0.01em; }
++.game-over p { margin: 0 0 14px; color: var(--muted); font-weight: 600; }
++.game-over .row { justify-content: center; }
++
++/* ---------- panel ---------- */
++.panel { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
++.card { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; box-shadow: var(--shadow); }
++.card-title { margin: 0 0 10px; font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); font-weight: 700; }
++.status-line { display: flex; align-items: center; gap: 10px; font-size: 1.05rem; font-weight: 600; margin-bottom: 14px; }
++.turn-dot { width: 14px; height: 14px; border-radius: 50%; border: 1.5px solid var(--piece-w-stroke); flex: none; }
++.turn-dot.w { background: var(--piece-w-fill); }
++.turn-dot.b { background: var(--piece-b-fill); }
++.turn-dot.over { background: var(--accent); border-color: var(--accent); }
++@media (prefers-color-scheme: dark) { .turn-dot { border-color: #8d8f88; } }
++
++.row { display: flex; flex-wrap: wrap; gap: 8px; }
++.btn {
++  font: inherit; font-size: 0.9rem; font-weight: 600; padding: 9px 14px; border-radius: 9px; cursor: pointer;
++  border: 1px solid var(--border); background: var(--surface); color: var(--text);
++}
++.btn:hover:not(:disabled) { border-color: var(--accent); }
++.btn.primary { background: var(--accent); border-color: var(--accent); color: var(--accent-text); }
++.btn:disabled { opacity: 0.45; cursor: not-allowed; }
++
++.moves {
++  list-style: none; margin: 0; padding: 0; counter-reset: mv; max-height: 260px; overflow-y: auto;
++  font-variant-numeric: tabular-nums; font-size: 0.92rem;
++}
++.moves li { display: grid; grid-template-columns: 2.2em 1fr 1fr; padding: 3px 4px; border-radius: 6px; counter-increment: mv; }
++.moves li:nth-child(even) { background: var(--accent-soft); }
++.moves li::before { content: counter(mv) '.'; color: var(--muted); }
++.moves li.empty { display: block; color: var(--muted); background: none; }
++.moves li.empty::before { content: none; }
++.ply { font-weight: 600; }
++
++.puzzle-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
++.puzzle-head .card-title { margin-bottom: 6px; }
++.tag { font-size: 0.78rem; font-weight: 700; padding: 3px 9px; border-radius: 999px; background: var(--accent-soft); color: var(--accent); }
++.muted { color: var(--muted); margin: 0 0 10px; font-size: 0.95rem; }
++.feedback { min-height: 44px; margin-bottom: 10px; display: flex; align-items: center; }
++.msg { font-weight: 600; }
++.msg.wrong { color: var(--danger); }
++.solved { color: var(--good); font-size: 1.05rem; }
++.puzzle-grid { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
++.pz {
++  font: inherit; font-weight: 700; font-size: 0.9rem; aspect-ratio: 1; border-radius: 8px; cursor: pointer;
++  border: 1px solid var(--border); background: var(--surface); color: var(--text); min-height: 38px;
++}
++.pz.done { background: var(--accent-soft); color: var(--accent); border-color: transparent; }
++.pz[aria-current='true'] { outline: 2px solid var(--accent); outline-offset: 1px; }
++
++@media (max-width: 420px) {
++  #app { padding: 10px 12px 28px; }
++  .brand span:last-child { font-size: 1rem; }
++  .tab { padding: 7px 13px; }
++  .promotion button[data-piece] { width: 54px; height: 54px; }
++}
+diff --git a/src/ui/app.ts b/src/ui/app.ts
+new file mode 100644
+index 0000000..08a515c
+--- /dev/null
++++ b/src/ui/app.ts
+@@ -0,0 +1,371 @@
++import { Game, START_FEN } from '../engine/index.ts';
++import type { Colour, GameStatus, Move, Square } from '../engine/index.ts';
++import { BoardView } from './board-view.ts';
++import type { MoveInput } from './board-view.ts';
++import { pieceSvg } from './pieces.ts';
++
++interface Puzzle { id: number; type: string; fen: string; solution: string[] }
++
++type Mode = 'play' | 'puzzle';
++
++const colourName = (c: Colour) => (c === 'w' ? 'White' : 'Black');
++
++function resultText(s: GameStatus): { title: string; detail: string } | null {
++  switch (s.state) {
++    case 'checkmate': return { title: 'Checkmate', detail: `${colourName(s.winner)} wins` };
++    case 'stalemate': return { title: 'Stalemate', detail: 'Draw' };
++    case 'draw':
++      return {
++        title: 'Draw',
++        detail: s.reason === 'threefold' ? 'Threefold repetition' : 'Fifty-move rule',
++      };
++    default: return null;
++  }
++}
++
++function el<K extends keyof HTMLElementTagNameMap>(tag: K, cls?: string, text?: string): HTMLElementTagNameMap[K] {
++  const e = document.createElement(tag);
++  if (cls) e.className = cls;
++  if (text !== undefined) e.textContent = text;
++  return e;
++}
++
++function button(label: string, onClick: () => void, cls = 'btn'): HTMLButtonElement {
++  const b = el('button', cls, label);
++  b.type = 'button';
++  b.addEventListener('click', onClick);
++  return b;
++}
++
++export class App {
++  private board: BoardView;
++  private panel: HTMLElement;
++  private tabs: HTMLElement;
++  private banner: HTMLElement;
++
++  private mode: Mode = 'play';
++  private notice = '';
++
++  // play mode
++  private game = new Game();
++  private startFen = START_FEN;
++  private orientation: Colour = 'w';
++  private gameOverDismissed = false;
++
++  // puzzle mode
++  private puzzles: Puzzle[] = [];
++  private puzzleIndex = 0;
++  private puzzleGame = new Game();
++  private puzzleStep = 0;
++  private puzzleSolved = false;
++  private puzzleBusy = false;
++  private puzzleWrong: { from: Square; to: Square } | null = null;
++  private puzzleMessage = '';
++  private solvedIds = new Set<number>();
++  private replyTimer = 0;
++
++  constructor(root: HTMLElement) {
++    this.board = new BoardView({ onMove: (m) => this.onUserMove(m) });
++    this.panel = el('aside', 'panel');
++    this.tabs = el('nav', 'tabs');
++    this.tabs.setAttribute('aria-label', 'Mode');
++    this.banner = el('div', 'banner');
++    this.banner.setAttribute('role', 'status');
++
++    const header = el('header', 'top');
++    const brand = el('div', 'brand');
++    brand.innerHTML = `<span class="brand-mark">${pieceSvg('w', 'n')}</span><span>Chess trainer</span>`;
++    header.append(brand, this.tabs);
++
++    const main = el('main', 'layout');
++    const boardCol = el('section', 'board-col');
++    boardCol.append(this.board.el);
++    main.append(boardCol, this.panel);
++    root.replaceChildren(header, this.banner, main);
++
++    try {
++      const saved = JSON.parse(localStorage.getItem('solved-puzzles') || '[]');
++      if (Array.isArray(saved)) this.solvedIds = new Set(saved.filter((n) => typeof n === 'number'));
++    } catch { /* ignore */ }
++
++    window.addEventListener('popstate', () => void this.loadFromUrl());
++  }
++
++  async start(): Promise<void> {
++    try {
++      const res = await fetch(`${import.meta.env.BASE_URL}puzzles.json`);
++      this.puzzles = await res.json();
++    } catch {
++      this.puzzles = [];
++    }
++    await this.loadFromUrl();
++  }
++
++  private async loadFromUrl(): Promise<void> {
++    const params = new URLSearchParams(location.search);
++    this.notice = '';
++    const puzzleParam = params.get('puzzle');
++    const fenParam = params.get('fen');
++    if (puzzleParam !== null && this.puzzles.length) {
++      let n = Number.parseInt(puzzleParam, 10);
++      if (!Number.isFinite(n) || n < 1 || n > this.puzzles.length) {
++        this.notice = `There is no puzzle ${puzzleParam}; showing puzzle 1.`;
++        n = 1;
++      }
++      this.mode = 'puzzle';
++      this.openPuzzle(n - 1);
++      return;
++    }
++    this.mode = 'play';
++    let fen = START_FEN;
++    if (fenParam) {
++      try {
++        new Game(fenParam);
++        fen = fenParam;
++      } catch {
++        this.notice = 'That FEN could not be read, so the game starts from the standard position.';
++      }
++    }
++    this.newGame(fen);
++  }
++
++  private navigate(search: string): void {
++    const url = location.pathname + search;
++    if (url !== location.pathname + location.search) history.pushState(null, '', url);
++  }
++
++  // ---------- play mode ----------
++
++  private newGame(fen = START_FEN): void {
++    this.startFen = fen;
++    this.game = new Game(fen);
++    this.orientation = 'w';
++    this.gameOverDismissed = false;
++    this.render();
++  }
++
++  private onUserMove(m: MoveInput): void {
++    if (this.mode === 'puzzle') return this.onPuzzleMove(m);
++    if (this.game.isGameOver()) return;
++    if (!this.game.move(m)) return;
++    this.render();
++  }
++
++  // ---------- puzzle mode ----------
++
++  private openPuzzle(i: number): void {
++    window.clearTimeout(this.replyTimer);
++    this.puzzleIndex = i;
++    const p = this.puzzles[i];
++    this.puzzleGame = new Game(p.fen);
++    this.puzzleStep = 0;
++    this.puzzleSolved = false;
++    this.puzzleBusy = false;
++    this.puzzleWrong = null;
++    this.puzzleMessage = '';
++    this.render();
++  }
++
++  private goPuzzle(i: number): void {
++    this.navigate(`?puzzle=${i + 1}`);
++    this.notice = '';
++    this.mode = 'puzzle';
++    this.openPuzzle(i);
++  }
++
++  private onPuzzleMove(m: MoveInput): void {
++    if (this.puzzleSolved || this.puzzleBusy) return;
++    const p = this.puzzles[this.puzzleIndex];
++    const g = this.puzzleGame;
++    const played = g.move(m);
++    if (!played) return;
++    const expected = p.solution[this.puzzleStep];
++    const last = this.puzzleStep === p.solution.length - 1;
++    const ok = played.uci === expected || (last && g.status().state === 'checkmate');
++    if (!ok) {
++      g.undo();
++      this.puzzleWrong = { from: m.from, to: m.to };
++      this.puzzleMessage = `${played.san} isn't the answer. Try again.`;
++      this.render();
++      return;
++    }
++    this.puzzleWrong = null;
++    this.puzzleStep++;
++    if (this.puzzleStep >= p.solution.length) {
++      this.puzzleSolved = true;
++      this.solvedIds.add(p.id);
++      try { localStorage.setItem('solved-puzzles', JSON.stringify([...this.solvedIds])); } catch { /* ignore */ }
++      this.render();
++      return;
++    }
++    this.puzzleMessage = `${played.san} — good. Waiting for the reply…`;
++    this.puzzleBusy = true;
++    this.render();
++    this.replyTimer = window.setTimeout(() => {
++      const reply = g.move(p.solution[this.puzzleStep]);
++      this.puzzleStep++;
++      this.puzzleBusy = false;
++      this.puzzleMessage = reply ? `${colourName(g.turn() === 'w' ? 'b' : 'w')} replied ${reply.san}. Now find the mate.` : '';
++      this.render();
++    }, 450);
++  }
++
++  // ---------- rendering ----------
++
++  private render(): void {
++    this.renderTabs();
++    this.banner.textContent = this.notice;
++    this.banner.hidden = !this.notice;
++    if (this.mode === 'play') this.renderPlay();
++    else this.renderPuzzle();
++  }
++
++  private renderTabs(): void {
++    const mk = (mode: Mode, label: string, go: () => void) => {
++      const b = button(label, go, 'tab');
++      b.setAttribute('aria-pressed', String(this.mode === mode));
++      return b;
++    };
++    this.tabs.replaceChildren(
++      mk('play', 'Play', () => {
++        if (this.mode === 'play') return;
++        window.clearTimeout(this.replyTimer);
++        this.navigate('');
++        this.notice = '';
++        this.mode = 'play';
++        this.newGame();
++      }),
++      mk('puzzle', 'Puzzles', () => {
++        if (this.mode === 'puzzle') return;
++        this.goPuzzle(this.puzzleIndex);
++      }),
++    );
++  }
++
++  private lastMoveOf(g: Game): { from: Square; to: Square } | null {
++    const h = g.history();
++    const m: Move | undefined = h[h.length - 1];
++    return m ? { from: m.from, to: m.to } : null;
++  }
++
++  private renderPlay(): void {
++    const g = this.game;
++    const status = g.status();
++    const over = resultText(status);
++    this.board.set({ game: g, orientation: this.orientation, interactive: !over, lastMove: this.lastMoveOf(g), wrong: null });
++
++    if (over && !this.gameOverDismissed) {
++      const modal = el('div', 'game-over');
++      modal.dataset.testid = 'game-over';
++      modal.setAttribute('role', 'dialog');
++      modal.setAttribute('aria-label', 'Game over');
++      modal.append(el('h2', '', over.title), el('p', '', over.detail));
++      const row = el('div', 'row');
++      row.append(
++        button('New game', () => this.restart(), 'btn primary'),
++        button('View board', () => { this.gameOverDismissed = true; this.render(); }, 'btn'),
++      );
++      modal.append(row);
++      this.board.showModal(modal);
++    }
++
++    const card = el('div', 'card status-card');
++    const turn = g.turn();
++    const line = el('div', 'status-line');
++    const dot = el('span', `turn-dot ${over ? 'over' : turn}`);
++    let text: string;
++    if (over) text = `${over.title} — ${over.detail}`;
++    else text = `${colourName(turn)} to move${status.state === 'playing' && status.check ? ' · Check!' : ''}`;
++    line.append(dot, el('span', '', text));
++    card.append(el('h2', 'card-title', 'Two-player game'), line);
++    const controls = el('div', 'row');
++    const undo = button('Undo', () => {
++      if (g.undo()) { this.gameOverDismissed = false; this.render(); }
++    });
++    undo.disabled = g.history().length === 0;
++    controls.append(
++      button('New game', () => this.restart(), 'btn primary'),
++      undo,
++      button('Flip board', () => { this.orientation = this.orientation === 'w' ? 'b' : 'w'; this.render(); }),
++    );
++    card.append(controls);
++
++    const movesCard = el('div', 'card');
++    movesCard.append(el('h2', 'card-title', 'Moves'));
++    const list = el('ol', 'moves');
++    const hist = g.history();
++    const startBlack = new Game(this.startFen).turn() === 'b';
++    const plies: (string | null)[] = startBlack ? [null, ...hist.map((m) => m.san)] : hist.map((m) => m.san);
++    for (let i = 0; i < plies.length; i += 2) {
++      const li = el('li');
++      li.append(el('span', 'ply', plies[i] ?? '…'), el('span', 'ply', plies[i + 1] ?? ''));
++      list.append(li);
++    }
++    if (!plies.length) list.append(el('li', 'empty', 'No moves yet. Tap or drag a piece.'));
++    movesCard.append(list);
++    this.panel.replaceChildren(card, movesCard);
++    list.scrollTop = list.scrollHeight;
++  }
++
++  private restart(): void {
++    if (this.startFen !== START_FEN) this.navigate('');
++    this.notice = '';
++    this.newGame(START_FEN);
++  }
++
++  private renderPuzzle(): void {
++    const p = this.puzzles[this.puzzleIndex];
++    const g = this.puzzleGame;
++    const side = new Game(p.fen).turn();
++    this.board.set({
++      game: g,
++      orientation: side,
++      interactive: !this.puzzleSolved && !this.puzzleBusy,
++      lastMove: this.lastMoveOf(g),
++      wrong: this.puzzleWrong,
++    });
++
++    const card = el('div', 'card');
++    const head = el('div', 'puzzle-head');
++    head.append(
++      el('h2', 'card-title', `Puzzle ${p.id} of ${this.puzzles.length}`),
++      el('span', 'tag', p.type === 'mate-in-2' ? 'Mate in 2' : 'Mate in 1'),
++    );
++    card.append(head);
++    card.append(el('p', 'muted', `${colourName(side)} to play and mate${p.type === 'mate-in-2' ? ' in two moves' : ' in one move'}.`));
++
++    const feedback = el('div', 'feedback');
++    feedback.setAttribute('aria-live', 'polite');
++    if (this.puzzleSolved) {
++      const solved = el('div', 'solved');
++      solved.dataset.testid = 'puzzle-solved';
++      solved.append(el('strong', '', 'Solved!'), el('span', '', ` Checkmate with ${g.history().at(-1)?.san ?? ''}.`));
++      feedback.append(solved);
++    } else if (this.puzzleMessage) {
++      feedback.append(el('div', this.puzzleWrong ? 'msg wrong' : 'msg', this.puzzleMessage));
++    }
++    card.append(feedback);
++
++    const row = el('div', 'row');
++    const prev = button('Previous', () => this.goPuzzle(this.puzzleIndex - 1));
++    prev.disabled = this.puzzleIndex === 0;
++    const next = button('Next puzzle', () => this.goPuzzle(this.puzzleIndex + 1), this.puzzleSolved ? 'btn primary' : 'btn');
++    next.disabled = this.puzzleIndex >= this.puzzles.length - 1;
++    next.dataset.testid = 'next-puzzle';
++    row.append(prev, button('Retry', () => this.openPuzzle(this.puzzleIndex)), next);
++    card.append(row);
++
++    const listCard = el('div', 'card');
++    listCard.append(el('h2', 'card-title', 'All puzzles'));
++    const grid = el('div', 'puzzle-grid');
++    this.puzzles.forEach((q, i) => {
++      const b = button(String(q.id), () => this.goPuzzle(i), 'pz');
++      if (i === this.puzzleIndex) b.setAttribute('aria-current', 'true');
++      if (this.solvedIds.has(q.id)) b.classList.add('done');
++      b.setAttribute('aria-label', `Puzzle ${q.id}${this.solvedIds.has(q.id) ? ', solved' : ''}`);
++      grid.append(b);
++    });
++    listCard.append(grid);
++    this.panel.replaceChildren(card, listCard);
++  }
++}
+diff --git a/src/ui/board-view.ts b/src/ui/board-view.ts
+new file mode 100644
+index 0000000..b8af8ac
+--- /dev/null
++++ b/src/ui/board-view.ts
+@@ -0,0 +1,268 @@
++import type { Colour, Game, Move, Square } from '../engine/index.ts';
++import { pieceSvg, PIECE_NAMES } from './pieces.ts';
++
++type Promo = 'q' | 'r' | 'b' | 'n';
++export interface MoveInput { from: Square; to: Square; promotion?: Promo }
++
++export interface BoardOptions {
++  /** Called with a legal move picked by the user (promotion already chosen). */
++  onMove: (m: MoveInput) => void;
++}
++
++interface DragState {
++  from: Square;
++  pointerId: number;
++  startX: number;
++  startY: number;
++  wasSelected: boolean;
++  dragging: boolean;
++  ghost?: HTMLElement;
++}
++
++const FILES = 'abcdefgh';
++
++export class BoardView {
++  readonly el: HTMLElement;
++  private grid: HTMLElement;
++  private overlay: HTMLElement;
++  private game: Game | null = null;
++  private orientation: Colour = 'w';
++  private interactive = true;
++  private selected: Square | null = null;
++  private lastMove: { from: Square; to: Square } | null = null;
++  private wrong: { from: Square; to: Square } | null = null;
++  private drag: DragState | null = null;
++  private pendingPromo: { from: Square; to: Square } | null = null;
++  private opts: BoardOptions;
++
++  constructor(opts: BoardOptions) {
++    this.opts = opts;
++    this.el = document.createElement('div');
++    this.el.className = 'board-wrap';
++    this.grid = document.createElement('div');
++    this.grid.className = 'board';
++    this.grid.setAttribute('role', 'grid');
++    this.grid.setAttribute('aria-label', 'Chess board');
++    this.overlay = document.createElement('div');
++    this.overlay.className = 'board-overlay';
++    this.el.append(this.grid, this.overlay);
++    this.grid.addEventListener('pointerdown', (e) => this.onDown(e));
++    this.grid.addEventListener('pointermove', (e) => this.onMoveEvt(e));
++    this.grid.addEventListener('pointerup', (e) => this.onUp(e));
++    this.grid.addEventListener('pointercancel', () => this.cancelDrag());
++    this.grid.addEventListener('contextmenu', (e) => e.preventDefault());
++  }
++
++  set(state: {
++    game: Game;
++    orientation?: Colour;
++    interactive?: boolean;
++    lastMove?: { from: Square; to: Square } | null;
++    wrong?: { from: Square; to: Square } | null;
++  }): void {
++    this.game = state.game;
++    if (state.orientation) this.orientation = state.orientation;
++    if (state.interactive !== undefined) this.interactive = state.interactive;
++    if (state.lastMove !== undefined) this.lastMove = state.lastMove;
++    if (state.wrong !== undefined) this.wrong = state.wrong;
++    if (!this.interactive) this.selected = null;
++    this.closePromo();
++    this.render();
++  }
++
++  private targets(): Move[] {
++    if (!this.game || !this.selected) return [];
++    return this.game.moves(this.selected);
++  }
++
++  render(): void {
++    const game = this.game;
++    if (!game) return;
++    const targets = new Map<Square, Move>();
++    for (const m of this.targets()) targets.set(m.to, m);
++    const checkSq = game.inCheck() ? game.kingSquare(game.turn()) : null;
++    const frag = document.createDocumentFragment();
++    for (let row = 0; row < 8; row++) {
++      for (let col = 0; col < 8; col++) {
++        const file = this.orientation === 'w' ? col : 7 - col;
++        const rank = this.orientation === 'w' ? 7 - row : row; // 0-based rank index
++        const sq = FILES[file] + (rank + 1);
++        const cell = document.createElement('div');
++        const light = (file + rank) % 2 === 1;
++        cell.className = 'sq ' + (light ? 'light' : 'dark');
++        cell.dataset.square = sq;
++        cell.setAttribute('role', 'gridcell');
++        if (this.lastMove && (this.lastMove.from === sq || this.lastMove.to === sq)) cell.classList.add('last');
++        if (this.wrong && (this.wrong.from === sq || this.wrong.to === sq)) cell.classList.add('wrong');
++        if (this.selected === sq) cell.classList.add('selected');
++        if (checkSq === sq) cell.classList.add('check');
++        const p = game.get(sq);
++        const t = targets.get(sq);
++        if (t) cell.classList.add(p || t.flags.enPassant ? 'target-capture' : 'target');
++        if (col === 0) cell.insertAdjacentHTML('beforeend', `<span class="coord rank">${rank + 1}</span>`);
++        if (row === 7) cell.insertAdjacentHTML('beforeend', `<span class="coord file">${FILES[file]}</span>`);
++        let label = sq;
++        if (p) {
++          const piece = document.createElement('div');
++          piece.className = 'piece';
++          piece.dataset.piece = p.colour + p.type.toUpperCase();
++          piece.innerHTML = pieceSvg(p.colour, p.type);
++          if (this.drag?.dragging && this.drag.from === sq) piece.classList.add('dragging-src');
++          cell.append(piece);
++          label += `, ${p.colour === 'w' ? 'white' : 'black'} ${PIECE_NAMES[p.type]}`;
++        }
++        cell.setAttribute('aria-label', label);
++        frag.append(cell);
++      }
++    }
++    this.grid.replaceChildren(frag);
++  }
++
++  private squareAt(x: number, y: number): Square | null {
++    const r = this.grid.getBoundingClientRect();
++    const col = Math.floor(((x - r.left) / r.width) * 8);
++    const row = Math.floor(((y - r.top) / r.height) * 8);
++    if (col < 0 || col > 7 || row < 0 || row > 7) return null;
++    const file = this.orientation === 'w' ? col : 7 - col;
++    const rank = this.orientation === 'w' ? 7 - row : row;
++    return FILES[file] + (rank + 1);
++  }
++
++  private ownPiece(sq: Square): boolean {
++    const p = this.game?.get(sq);
++    return !!p && p.colour === this.game!.turn();
++  }
++
++  private onDown(e: PointerEvent): void {
++    if (!this.game || !this.interactive || this.pendingPromo) return;
++    if (e.button !== 0) return;
++    const sq = this.squareAt(e.clientX, e.clientY);
++    if (!sq) return;
++    e.preventDefault();
++    if (this.selected && sq !== this.selected && this.targets().some((m) => m.to === sq)) {
++      this.attempt(this.selected, sq);
++      return;
++    }
++    if (this.ownPiece(sq)) {
++      const wasSelected = this.selected === sq;
++      this.selected = sq;
++      this.wrong = null;
++      this.drag = { from: sq, pointerId: e.pointerId, startX: e.clientX, startY: e.clientY, wasSelected, dragging: false };
++      try { this.grid.setPointerCapture(e.pointerId); } catch { /* ignore */ }
++      this.render();
++      return;
++    }
++    if (this.selected) {
++      this.selected = null;
++      this.render();
++    }
++  }
++
++  private onMoveEvt(e: PointerEvent): void {
++    const d = this.drag;
++    if (!d || d.pointerId !== e.pointerId) return;
++    if (!d.dragging) {
++      if (Math.hypot(e.clientX - d.startX, e.clientY - d.startY) < 5) return;
++      d.dragging = true;
++      const p = this.game!.get(d.from)!;
++      const ghost = document.createElement('div');
++      ghost.className = 'drag-ghost';
++      const size = this.grid.getBoundingClientRect().width / 8;
++      ghost.style.width = ghost.style.height = `${size}px`;
++      ghost.innerHTML = pieceSvg(p.colour, p.type);
++      document.body.append(ghost);
++      d.ghost = ghost;
++      this.render();
++    }
++    if (d.ghost) {
++      const s = d.ghost.offsetWidth;
++      d.ghost.style.transform = `translate(${e.clientX - s / 2}px, ${e.clientY - s / 2}px)`;
++    }
++  }
++
++  private onUp(e: PointerEvent): void {
++    const d = this.drag;
++    if (!d || d.pointerId !== e.pointerId) return;
++    this.drag = null;
++    d.ghost?.remove();
++    const sq = this.squareAt(e.clientX, e.clientY);
++    if (d.dragging) {
++      if (sq && sq !== d.from && this.targets().some((m) => m.to === sq)) {
++        this.attempt(d.from, sq);
++        return;
++      }
++      this.render();
++      return;
++    }
++    if (d.wasSelected && sq === d.from) {
++      this.selected = null;
++      this.render();
++    }
++  }
++
++  private cancelDrag(): void {
++    if (!this.drag) return;
++    this.drag.ghost?.remove();
++    this.drag = null;
++    this.render();
++  }
++
++  private attempt(from: Square, to: Square): void {
++    const moves = this.game!.moves(from).filter((m) => m.to === to);
++    if (!moves.length) return;
++    if (moves.some((m) => m.promotion)) {
++      this.openPromo(from, to);
++      return;
++    }
++    this.selected = null;
++    this.opts.onMove({ from, to });
++  }
++
++  private openPromo(from: Square, to: Square): void {
++    this.pendingPromo = { from, to };
++    const colour = this.game!.turn();
++    const picker = document.createElement('div');
++    picker.className = 'promotion';
++    picker.dataset.testid = 'promotion';
++    picker.setAttribute('role', 'dialog');
++    picker.setAttribute('aria-label', 'Choose promotion piece');
++    picker.innerHTML = `<p>Promote to</p><div class="promo-row">${(['q', 'r', 'b', 'n'] as const)
++      .map(
++        (t) =>
++          `<button type="button" data-piece="${t}" aria-label="${PIECE_NAMES[t]}" title="${PIECE_NAMES[t]}">${pieceSvg(colour, t)}</button>`,
++      )
++      .join('')}</div><button type="button" class="promo-cancel">Cancel</button>`;
++    picker.addEventListener('click', (e) => {
++      const btn = (e.target as HTMLElement).closest('button');
++      if (!btn) return;
++      const promo = btn.dataset.piece as Promo | undefined;
++      const pending = this.pendingPromo;
++      this.closePromo();
++      if (promo && pending) {
++        this.selected = null;
++        this.opts.onMove({ ...pending, promotion: promo });
++      } else {
++        this.render();
++      }
++    });
++    this.overlay.replaceChildren(picker);
++    this.overlay.classList.add('open');
++    (picker.querySelector('button') as HTMLButtonElement).focus();
++  }
++
++  private closePromo(): void {
++    this.pendingPromo = null;
++    this.overlay.replaceChildren();
++    this.overlay.classList.remove('open');
++  }
++
++  /** Shows a modal over the board (used for the game-over screen). */
++  showModal(node: HTMLElement): void {
++    this.overlay.replaceChildren(node);
++    this.overlay.classList.add('open');
++  }
++
++  clearModal(): void {
++    this.closePromo();
++  }
++}
+diff --git a/src/ui/pieces.ts b/src/ui/pieces.ts
+new file mode 100644
+index 0000000..a23354f
+--- /dev/null
++++ b/src/ui/pieces.ts
+@@ -0,0 +1,33 @@
++// Original piece drawings, built from simple geometric shapes in a 45x45 box.
++// No fonts, image files or borrowed artwork.
++import type { Colour, PieceType } from '../engine/index.ts';
++
++const BASE = '<rect x="10" y="33" width="25" height="5.5" rx="2.2"/>';
++
++const SHAPES: Record<PieceType, string> = {
++  p: `<circle cx="22.5" cy="14.5" r="5.6"/>
++      <path d="M16.5 33 L19.2 21.5 Q22.5 19.6 25.8 21.5 L28.5 33 Z"/>${BASE}`,
++  r: `<path d="M13.5 9 h4 v3.2 h3 V9 h4 v3.2 h3 V9 h4 v7.5 l-2.5 2.5 V33 h-13 V19 l-2.5 -2.5 Z"/>
++      <path class="d" d="M16 19 h13" fill="none"/>${BASE}`,
++  n: `<path d="M14.5 33 C14 26 16.5 22.5 19 20 C16.5 19.8 13.2 21.6 11.5 20.4 C10 19.2 11 16.8 13 15.3 L18.6 10.6 L19 6.8 L22.4 9.4 C29.6 9.8 33.6 16.2 33.4 24 L33 33 Z"/>
++      <circle class="eye" cx="19.6" cy="14.6" r="1.5"/>
++      <path class="d" d="M24 13.6 C28.4 15.6 30.2 20.2 29.8 28" fill="none"/>${BASE}`,
++  b: `<circle cx="22.5" cy="7.6" r="2.6"/>
++      <path d="M22.5 10.6 C29.6 14.6 30.6 21.4 27 26.4 L28 33 H17 L18 26.4 C14.4 21.4 15.4 14.6 22.5 10.6 Z"/>
++      <path class="d" d="M20.4 20.8 L25.6 15.4 M18.6 26.4 H26.4" fill="none"/>${BASE}`,
++  q: `<path d="M12.5 33 L10.2 16.4 L16.8 24 L18.8 12.6 L22.5 22.4 L26.2 12.6 L28.2 24 L34.8 16.4 L32.5 33 Z"/>
++      <circle cx="10.2" cy="14.6" r="2.3"/><circle cx="18.8" cy="10.6" r="2.3"/>
++      <circle cx="26.2" cy="10.6" r="2.3"/><circle cx="34.8" cy="14.6" r="2.3"/>
++      <path class="d" d="M14 28.4 H31" fill="none"/>${BASE}`,
++  k: `<path d="M21.2 5 h2.6 v3.2 h3.2 v2.6 h-3.2 v4.4 h-2.6 v-4.4 H18 V8.2 h3.2 Z"/>
++      <path d="M14 33 C11 26.5 11.6 18.6 17.6 17.4 C20 17 21.6 18.4 22.5 20 C23.4 18.4 25 17 27.4 17.4 C33.4 18.6 34 26.5 31 33 Z"/>
++      <path class="d" d="M22.5 20.4 V28 M14.6 28.4 H30.4" fill="none"/>${BASE}`,
++};
++
++export function pieceSvg(colour: Colour, type: PieceType): string {
++  return `<svg class="piece-svg ${colour === 'w' ? 'pw' : 'pb'}" viewBox="0 0 45 45" aria-hidden="true">${SHAPES[type]}</svg>`;
++}
++
++export const PIECE_NAMES: Record<PieceType, string> = {
++  p: 'pawn', n: 'knight', b: 'bishop', r: 'rook', q: 'queen', k: 'king',
++};
+diff --git a/tests/e2e/app.spec.ts b/tests/e2e/app.spec.ts
+new file mode 100644
+index 0000000..417db6d
+--- /dev/null
++++ b/tests/e2e/app.spec.ts
+@@ -0,0 +1,104 @@
++import { test, expect, type Page } from '@playwright/test';
++
++const sq = (page: Page, s: string) => page.locator(`[data-square="${s}"]`);
++
++async function tapMove(page: Page, from: string, to: string) {
++  await sq(page, from).click();
++  await sq(page, to).click();
++}
++
++async function dragMove(page: Page, from: string, to: string) {
++  await sq(page, from).dragTo(sq(page, to));
++}
++
++let errors: string[] = [];
++test.beforeEach(({ page }) => {
++  errors = [];
++  page.on('console', (m) => { if (m.type() === 'error') errors.push(m.text()); });
++  page.on('pageerror', (e) => errors.push(e.message));
++});
++test.afterEach(() => {
++  expect(errors).toEqual([]);
++});
++
++test('plays a two-player game to checkmate (tap and drag)', async ({ page }) => {
++  await page.goto('/');
++  await expect(page.locator('[data-square]')).toHaveCount(64);
++  await expect(page.locator('[data-piece]')).toHaveCount(32);
++  await expect(sq(page, 'e1').locator('[data-piece="wK"]')).toBeVisible();
++
++  // Tapping a piece shows its legal targets.
++  await sq(page, 'f2').click();
++  await expect(sq(page, 'f2')).toHaveClass(/selected/);
++  await expect(page.locator('.sq.target')).toHaveCount(2);
++  await sq(page, 'f3').click();
++  await expect(sq(page, 'f3').locator('[data-piece="wP"]')).toBeVisible();
++  await expect(sq(page, 'f3')).toHaveClass(/last/);
++
++  await dragMove(page, 'e7', 'e5');
++  await expect(sq(page, 'e5').locator('[data-piece="bP"]')).toBeVisible();
++  await tapMove(page, 'g2', 'g4');
++  await dragMove(page, 'd8', 'h4');
++
++  const over = page.getByTestId('game-over');
++  await expect(over).toBeVisible();
++  await expect(over).toContainText('Checkmate');
++  await expect(over).toContainText('Black wins');
++  await expect(sq(page, 'e1')).toHaveClass(/check/);
++});
++
++test('illegal moves are refused', async ({ page }) => {
++  await page.goto('/');
++  await tapMove(page, 'e2', 'e5');
++  await expect(sq(page, 'e2').locator('[data-piece="wP"]')).toBeVisible();
++  await expect(sq(page, 'e5').locator('[data-piece]')).toHaveCount(0);
++});
++
++test('solves a mate-in-1 puzzle', async ({ page }) => {
++  await page.goto('/?puzzle=1');
++  await tapMove(page, 'e6', 'h3');
++  await expect(page.getByTestId('puzzle-solved')).toBeVisible();
++});
++
++test('flags a wrong move, then solves a mate-in-2 with the automatic reply', async ({ page }) => {
++  await page.goto('/?puzzle=7');
++  await tapMove(page, 'a5', 'a6');
++  await expect(page.locator('.msg.wrong')).toBeVisible();
++  await expect(sq(page, 'a5').locator('[data-piece="wQ"]')).toBeVisible();
++  await expect(page.getByTestId('puzzle-solved')).toHaveCount(0);
++
++  await tapMove(page, 'a5', 'c7');
++  await expect(sq(page, 'd4').locator('[data-piece="bP"]')).toBeVisible();
++  await dragMove(page, 'a3', 'a8');
++  await expect(page.getByTestId('puzzle-solved')).toBeVisible();
++
++  await page.getByTestId('next-puzzle').click();
++  await expect(page).toHaveURL(/puzzle=8/);
++  await expect(page.getByTestId('puzzle-solved')).toHaveCount(0);
++});
++
++test('promotion picker solves puzzle 11', async ({ page }) => {
++  await page.goto('/?puzzle=11');
++  await tapMove(page, 'g7', 'g8');
++  const picker = page.getByTestId('promotion');
++  await expect(picker).toBeVisible();
++  await expect(picker.locator('button[data-piece]')).toHaveCount(4);
++  await picker.locator('[data-piece="q"]').click();
++  await expect(sq(page, 'g8').locator('[data-piece="wQ"]')).toBeVisible();
++  await expect(sq(page, 'c7').locator('[data-piece="bK"]')).toBeVisible();
++  await tapMove(page, 'g8', 'd8');
++  await expect(page.getByTestId('puzzle-solved')).toBeVisible();
++});
++
++test('?fen starts from a position and underpromotion works', async ({ page }) => {
++  await page.goto('/?fen=' + encodeURIComponent('8/P6k/8/8/8/8/8/K7 w - - 0 1'));
++  await tapMove(page, 'a7', 'a8');
++  await page.getByTestId('promotion').locator('[data-piece="n"]').click();
++  await expect(sq(page, 'a8').locator('[data-piece="wN"]')).toBeVisible();
++});
++
++test('stalemate shows the game-over screen', async ({ page }) => {
++  await page.goto('/?fen=' + encodeURIComponent('k7/8/8/2Q5/8/8/8/7K w - - 0 1'));
++  await tapMove(page, 'c5', 'b6');
++  await expect(page.getByTestId('game-over')).toContainText('Stalemate');
++});
+diff --git a/tests/unit/perft.test.ts b/tests/unit/perft.test.ts
+new file mode 100644
+index 0000000..140112a
+--- /dev/null
++++ b/tests/unit/perft.test.ts
+@@ -0,0 +1,23 @@
++import { describe, expect, it } from 'vitest';
++import { START_FEN, perft } from '../../src/engine/index.ts';
++
++const KIWIPETE = 'r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1';
++
++describe('perft', () => {
++  it.each([
++    [1, 20],
++    [2, 400],
++    [3, 8902],
++    [4, 197281],
++  ])('start position depth %i = %i', (d, n) => {
++    expect(perft(START_FEN, d)).toBe(n);
++  });
++
++  it.each([
++    [1, 48],
++    [2, 2039],
++    [3, 97862],
++  ])('kiwipete depth %i = %i', (d, n) => {
++    expect(perft(KIWIPETE, d)).toBe(n);
++  });
++});
+diff --git a/tests/unit/rules.test.ts b/tests/unit/rules.test.ts
+new file mode 100644
+index 0000000..2b23e73
+--- /dev/null
++++ b/tests/unit/rules.test.ts
+@@ -0,0 +1,374 @@
++import { readFileSync } from 'node:fs';
++import { describe, expect, it } from 'vitest';
++import { Game, START_FEN } from '../../src/engine/index.ts';
++
++function play(g: Game, ...ucis: string[]) {
++  for (const u of ucis) {
++    const m = g.move(u);
++    if (!m) throw new Error(`illegal move ${u} in ${g.fen()}`);
++  }
++}
++const ucis = (g: Game, from?: string) => g.moves(from).map((m) => m.uci);
++
++describe('basics / legality', () => {
++  it('starts with 20 moves and white to move', () => {
++    const g = new Game();
++    expect(g.moves()).toHaveLength(20);
++    expect(g.turn()).toBe('w');
++    expect(g.fen()).toBe(START_FEN);
++    expect(g.get('e1')).toEqual({ colour: 'w', type: 'k' });
++    expect(g.board()[0][0]).toEqual({ colour: 'b', type: 'r' });
++    expect(g.kingSquare('b')).toBe('e8');
++  });
++
++  it('rejects illegal and malformed moves', () => {
++    const g = new Game();
++    expect(g.move('e2e5')).toBeNull();
++    expect(g.move('e7e5')).toBeNull(); // wrong side
++    expect(g.move('zz')).toBeNull();
++    expect(g.move({ from: 'e2', to: 'e4', promotion: 'q' })).toBeNull();
++    expect(g.move({ from: 'e2', to: 'e4' })?.san).toBe('e4');
++    expect(g.history()).toHaveLength(1);
++  });
++
++  it('pinned pieces cannot move off the pin line', () => {
++    const g = new Game('4k3/4r3/8/8/8/8/4N3/4K3 w - - 0 1');
++    expect(g.moves('e2')).toHaveLength(0);
++  });
++
++  it('undo restores the position', () => {
++    const g = new Game();
++    play(g, 'e2e4', 'e7e5', 'g1f3');
++    expect(g.undo()?.uci).toBe('g1f3');
++    play(g, 'g1f3');
++    g.undo();
++    g.undo();
++    g.undo();
++    expect(g.fen()).toBe(START_FEN);
++    expect(g.undo()).toBeNull();
++  });
++
++  it('throws on invalid FEN', () => {
++    expect(() => new Game('nonsense')).toThrow();
++    expect(() => new Game('8/8/8/8/8/8/8/8 w - - 0 1')).toThrow();
++  });
++});
++
++describe('castling', () => {
++  const base = 'r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1';
++  it('is available on both sides and executes', () => {
++    const g = new Game(base);
++    expect(ucis(g, 'e1')).toEqual(expect.arrayContaining(['e1g1', 'e1c1']));
++    const m = g.move('e1g1');
++    expect(m?.san).toBe('O-O');
++    expect(m?.flags.castle).toBe('k');
++    expect(g.fen()).toBe('r3k2r/8/8/8/8/8/8/R4RK1 b kq - 1 1');
++    const q = g.move('e8c8');
++    expect(q?.san).toBe('O-O-O');
++    expect(g.get('c8')?.type).toBe('k');
++    expect(g.get('d8')?.type).toBe('r');
++    expect(g.get('a8')).toBeNull();
++  });
++
++  it('white queenside castling executes', () => {
++    const g = new Game(base);
++    const m = g.move('e1c1');
++    expect(m?.san).toBe('O-O-O');
++    expect(g.get('d1')?.type).toBe('r');
++    expect(g.get('c1')?.type).toBe('k');
++  });
++
++  it('is blocked by pieces between king and rook', () => {
++    const g = new Game('r3k2r/8/8/8/8/8/8/R2QK1NR w KQkq - 0 1');
++    expect(ucis(g)).not.toContain('e1g1');
++    expect(ucis(g)).not.toContain('e1c1');
++    const h = new Game('r3k2r/8/8/8/8/8/8/RN2K2R w KQkq - 0 1'); // b1 occupied
++    expect(ucis(h)).not.toContain('e1c1');
++    expect(ucis(h)).toContain('e1g1');
++  });
++
++  it('is illegal while in check', () => {
++    const g = new Game('4r3/2k5/8/8/8/8/8/R3K2R w KQ - 0 1');
++    expect(ucis(g)).not.toContain('e1g1');
++    expect(ucis(g)).not.toContain('e1c1');
++  });
++
++  it('is illegal through check', () => {
++    const g = new Game('5r2/2k5/8/8/8/8/8/R3K2R w KQ - 0 1'); // f1 attacked
++    expect(ucis(g)).not.toContain('e1g1');
++    expect(ucis(g)).toContain('e1c1');
++    const h = new Game('3r4/2k5/8/8/8/8/8/R3K2R w KQ - 0 1'); // d1 attacked
++    expect(ucis(h)).not.toContain('e1c1');
++    expect(ucis(h)).toContain('e1g1');
++  });
++
++  it('is illegal into check', () => {
++    const g = new Game('6r1/2k5/8/8/8/8/8/R3K2R w KQ - 0 1'); // g1 attacked
++    expect(ucis(g)).not.toContain('e1g1');
++    expect(ucis(g)).toContain('e1c1');
++    const h = new Game('2r5/3k4/8/8/8/8/8/R3K2R w KQ - 0 1'); // c1 attacked
++    expect(ucis(h)).not.toContain('e1c1');
++  });
++
++  it('is allowed when only b1 is attacked', () => {
++    const g = new Game('1r6/2k5/8/8/8/8/8/R3K2R w KQ - 0 1');
++    expect(ucis(g)).toContain('e1c1');
++  });
++
++  it('is lost once the king has moved', () => {
++    const g = new Game(base);
++    play(g, 'e1e2', 'e8e7', 'e2e1', 'e7e8');
++    expect(ucis(g, 'e1')).not.toContain('e1g1');
++    expect(ucis(g, 'e1')).not.toContain('e1c1');
++  });
++
++  it('is lost on one side once that rook has moved', () => {
++    const g = new Game(base);
++    play(g, 'h1g1', 'a8b8', 'g1h1', 'b8a8');
++    expect(ucis(g, 'e1')).not.toContain('e1g1');
++    expect(ucis(g, 'e1')).toContain('e1c1');
++    const h = new Game(base);
++    play(h, 'a1b1', 'a8b8', 'b1a1', 'b8a8');
++    expect(ucis(h, 'e1')).toContain('e1g1');
++    expect(ucis(h, 'e1')).not.toContain('e1c1');
++  });
++
++  it('is lost when the rook is captured', () => {
++    const g = new Game('r3k2r/8/8/8/8/8/8/R3K2R b KQkq - 0 1');
++    play(g, 'h8h1');
++    expect(g.fen().split(' ')[2]).toBe('Qq');
++    expect(ucis(g)).not.toContain('e1g1');
++  });
++});
++
++describe('en passant', () => {
++  it('is available right after the double step and captures the pawn', () => {
++    const g = new Game();
++    play(g, 'e2e4', 'a7a6', 'e4e5', 'd7d5');
++    const ep = g.moves('e5').find((m) => m.flags.enPassant);
++    expect(ep?.uci).toBe('e5d6');
++    expect(ep?.san).toBe('exd6');
++    expect(ep?.captured).toBe('p');
++    g.move('e5d6');
++    expect(g.get('d5')).toBeNull();
++    expect(g.get('d6')).toEqual({ colour: 'w', type: 'p' });
++    g.undo();
++    expect(g.get('d5')).toEqual({ colour: 'b', type: 'p' });
++    expect(g.get('e5')).toEqual({ colour: 'w', type: 'p' });
++  });
++
++  it('expires if not played immediately', () => {
++    const g = new Game();
++    play(g, 'e2e4', 'a7a6', 'e4e5', 'd7d5', 'h2h3', 'h7h6');
++    expect(g.moves('e5').some((m) => m.flags.enPassant)).toBe(false);
++    expect(g.move('e5d6')).toBeNull();
++  });
++
++  it('is not flagged for a single-step pawn (plain capture instead)', () => {
++    const g = new Game();
++    play(g, 'e2e4', 'a7a6', 'e4e5', 'd7d6');
++    expect(g.moves('e5').some((m) => m.flags.enPassant)).toBe(false);
++    expect(g.move('e5d6')?.flags.enPassant).toBeUndefined();
++  });
++
++  it('is illegal if it exposes the king', () => {
++    // white king a5, black rook h5; capturing en passant removes both pawns from rank 5
++    const g = new Game('7k/8/8/K2pP2r/8/8/8/8 w - d6 0 1');
++    expect(ucis(g, 'e5')).not.toContain('e5d6');
++  });
++});
++
++describe('promotion', () => {
++  const fen = '7k/P7/8/8/8/8/8/K7 w - - 0 1';
++  it('offers queen, rook, bishop and knight', () => {
++    const g = new Game(fen);
++    const promos = g.moves('a7').map((m) => m.promotion);
++    expect(promos.sort()).toEqual(['b', 'n', 'q', 'r']);
++  });
++
++  it.each(['q', 'r', 'b', 'n'] as const)('promotes to %s', (p) => {
++    const g = new Game(fen);
++    const m = g.move({ from: 'a7', to: 'a8', promotion: p });
++    expect(m?.promotion).toBe(p);
++    expect(m?.uci).toBe(`a7a8${p}`);
++    expect(g.get('a8')).toEqual({ colour: 'w', type: p });
++    g.undo();
++    expect(g.get('a7')).toEqual({ colour: 'w', type: 'p' });
++  });
++
++  it('works via UCI string and requires a piece', () => {
++    const g = new Game(fen);
++    expect(g.move('a7a8')).toBeNull();
++    expect(g.move({ from: 'a7', to: 'a8' })).toBeNull();
++    expect(g.move({ from: 'a7', to: 'a8', promotion: 'p' as never })).toBeNull();
++    expect(g.move('a7a8n')?.san).toBe('a8=N');
++  });
++
++  it('promotes with capture', () => {
++    const g = new Game('1n5k/P7/8/8/8/8/8/K7 w - - 0 1');
++    expect(g.move('a7b8q')?.captured).toBe('n');
++  });
++});
++
++describe('check, checkmate, stalemate', () => {
++  it('detects check and restricts replies', () => {
++    const g = new Game('4k3/8/8/8/8/8/8/4RK2 b - - 0 1');
++    expect(g.inCheck()).toBe(true);
++    expect(g.status()).toEqual({ state: 'playing', check: true });
++    expect(ucis(g)).not.toContain('e8e7');
++    expect(ucis(g).sort()).toEqual(['e8d7', 'e8d8', 'e8f7', 'e8f8']);
++  });
++
++  it('no check at start', () => {
++    const g = new Game();
++    expect(g.inCheck()).toBe(false);
++    expect(g.status()).toEqual({ state: 'playing', check: false });
++    expect(g.isGameOver()).toBe(false);
++  });
++
++  it("fool's mate is checkmate", () => {
++    const g = new Game();
++    play(g, 'f2f3', 'e7e5', 'g2g4');
++    const m = g.move('d8h4');
++    expect(m?.san).toBe('Qh4#');
++    expect(g.status()).toEqual({ state: 'checkmate', winner: 'b' });
++    expect(g.isGameOver()).toBe(true);
++    expect(g.moves()).toHaveLength(0);
++    expect(g.move('a2a3')).toBeNull();
++  });
++
++  it('detects stalemate', () => {
++    const g = new Game('7k/5Q2/6K1/8/8/8/8/8 b - - 0 1');
++    expect(g.inCheck()).toBe(false);
++    expect(g.status()).toEqual({ state: 'stalemate' });
++    expect(g.isGameOver()).toBe(true);
++  });
++
++  it('check is reported after a checking move', () => {
++    const g = new Game();
++    play(g, 'e2e4', 'f7f6', 'd1h5');
++    expect(g.history()[2].san).toBe('Qh5+');
++    expect(g.status()).toEqual({ state: 'playing', check: true });
++  });
++});
++
++describe('draws', () => {
++  it('threefold repetition', () => {
++    const g = new Game();
++    play(g, 'g1f3', 'g8f6', 'f3g1', 'f6g8');
++    expect(g.status().state).toBe('playing'); // 2nd occurrence
++    play(g, 'g1f3', 'g8f6', 'f3g1');
++    expect(g.status().state).toBe('playing');
++    play(g, 'f6g8');
++    expect(g.status()).toEqual({ state: 'draw', reason: 'threefold' });
++    expect(g.isGameOver()).toBe(true);
++    g.undo();
++    expect(g.status().state).toBe('playing');
++  });
++
++  it('repetition requires the same castling rights', () => {
++    const g = new Game('r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1');
++    // rooks shuffle: first and later occurrences differ in rights, so no draw yet
++    play(g, 'h1g1', 'h8g8', 'g1h1', 'g8h8', 'h1g1', 'h8g8', 'g1h1', 'g8h8');
++    expect(g.status().state).toBe('playing');
++  });
++
++  it('fifty-move rule at halfmove clock 100', () => {
++    const g = new Game('4k3/8/8/8/8/8/8/R3K3 w - - 98 80');
++    play(g, 'a1a2');
++    expect(g.status()).toEqual({ state: 'playing', check: false });
++    play(g, 'e8d8');
++    expect(g.status()).toEqual({ state: 'draw', reason: 'fifty-move' });
++  });
++
++  it('a pawn move or capture resets the clock', () => {
++    const g = new Game('4k3/8/8/8/8/8/P7/4K3 w - - 99 80');
++    play(g, 'a2a3');
++    expect(g.status().state).toBe('playing');
++  });
++
++  it('checkmate takes precedence over fifty-move', () => {
++    const g = new Game('7k/5K2/8/8/8/8/8/6R1 w - - 99 80');
++    g.move('g1h1');
++    expect(g.status()).toEqual({ state: 'checkmate', winner: 'w' });
++  });
++});
++
++describe('SAN / UCI', () => {
++  it('basic moves and captures', () => {
++    const g = new Game();
++    play(g, 'e2e4', 'd7d5', 'e4d5', 'g8f6', 'g1f3');
++    expect(g.history().map((m) => m.san)).toEqual(['e4', 'd5', 'exd5', 'Nf6', 'Nf3']);
++    expect(g.history()[2].uci).toBe('e4d5');
++  });
++
++  it('piece captures use x', () => {
++    const g = new Game('4k3/8/8/3p4/8/2N5/8/4K3 w - - 0 1');
++    expect(g.move('c3d5')?.san).toBe('Nxd5');
++  });
++
++  it('disambiguates by file', () => {
++    const g = new Game('8/2k5/8/8/8/8/4K3/R6R w - - 0 1');
++    const sans = g.moves().filter((m) => m.to === 'd1' && m.piece === 'r').map((m) => m.san);
++    expect(sans.sort()).toEqual(['Rad1', 'Rhd1']);
++  });
++
++  it('disambiguates by rank', () => {
++    const g = new Game('7k/8/8/R7/8/8/8/R3K3 w - - 0 1');
++    const sans = g.moves().filter((m) => m.to === 'a3').map((m) => m.san);
++    expect(sans.sort()).toEqual(['R1a3', 'R5a3']);
++  });
++
++  it('disambiguates by file and rank', () => {
++    const g = new Game('8/8/8/8/7k/2Q5/8/Q1Q1K3 w - - 0 1');
++    const sans = g.moves().filter((m) => m.to === 'a3' && m.piece === 'q').map((m) => m.san);
++    expect(sans).toContain('Qc1a3');
++    expect(sans).toContain('Qaa3');
++    expect(sans).toContain('Q3a3');
++  });
++
++  it('promotion and check suffixes', () => {
++    const g = new Game('k7/4P3/8/8/8/8/8/K7 w - - 0 1');
++    const m = g.move('e7e8q');
++    expect(m?.san).toBe('e8=Q+');
++    expect(m?.uci).toBe('e7e8q');
++  });
++
++  it('promotion with capture and mate', () => {
++    const g = new Game('r6k/1P6/6K1/8/8/8/8/8 w - - 0 1');
++    expect(g.move('b7a8q')?.san).toBe('bxa8=Q#');
++  });
++
++  it('castling SAN with check', () => {
++    const g = new Game('5k2/8/8/8/8/8/8/4K2R w K - 0 1');
++    expect(g.move('e1g1')?.san).toBe('O-O+');
++  });
++
++  it('flags', () => {
++    const g = new Game();
++    expect(g.move('e2e4')?.flags.doublePush).toBe(true);
++    expect(g.move('e7e6')?.flags.doublePush).toBeUndefined();
++  });
++});
++
++describe('puzzles', () => {
++  const puzzles = JSON.parse(readFileSync('public/puzzles.json', 'utf8')) as {
++    id: number;
++    type: string;
++    fen: string;
++    solution: string[];
++  }[];
++
++  it('has puzzles', () => {
++    expect(puzzles.length).toBeGreaterThan(0);
++  });
++
++  it.each(puzzles.map((p) => [p.id, p] as const))('puzzle %s plays legally and ends in checkmate', (_id, p) => {
++    const g = new Game(p.fen);
++    for (const u of p.solution) {
++      expect(g.move(u), `${u} in ${g.fen()}`).not.toBeNull();
++    }
++    expect(g.status().state).toBe('checkmate');
++    expect(g.history().at(-1)?.san.endsWith('#')).toBe(true);
++  });
++});

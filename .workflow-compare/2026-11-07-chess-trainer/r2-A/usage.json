@@ -1,0 +1,36 @@
+{
+  "ms": 879214,
+  "status": "ok",
+  "pinned_model": "claude-opus-5-5",
+  "models_used": [
+    "claude-opus-5-5"
+  ],
+  "parts": [
+    {
+      "model": "opus",
+      "ms": 879214,
+      "step": "build",
+      "session": "910e4c53-7968-4c26-86df-d5a3d93cf2ed",
+      "total_cost_usd": 2.8160726,
+      "status": "ok",
+      "turns": 75,
+      "models_used": [
+        "claude-opus-5-5"
+      ],
+      "denied": [
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Write",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash"
+      ],
+      "exit": 0
+    }
+  ]
+}

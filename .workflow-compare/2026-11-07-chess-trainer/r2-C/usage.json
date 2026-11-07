@@ -1,0 +1,54 @@
+{
+  "ms": 352567,
+  "status": "ok",
+  "pinned_model": "claude-sonnet-5-5",
+  "models_used": [
+    "claude-sonnet-5-5"
+  ],
+  "parts": [
+    {
+      "model": "sonnet",
+      "ms": 268268,
+      "step": "build",
+      "session": "d257eb4c-376e-4e89-ae42-564b962d7dec",
+      "total_cost_usd": 0.7799742,
+      "status": "ok",
+      "turns": 48,
+      "models_used": [
+        "claude-sonnet-5-5"
+      ],
+      "denied": [
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash"
+      ],
+      "exit": 0
+    },
+    {
+      "model": "sonnet",
+      "ms": 84299,
+      "step": "check",
+      "session": "a805a017-34cb-448b-a044-a364ca6fedfe",
+      "total_cost_usd": 0.2972731999999999,
+      "status": "ok",
+      "turns": 27,
+      "models_used": [
+        "claude-sonnet-5-5"
+      ],
+      "denied": [
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash"
+      ],
+      "exit": 0
+    }
+  ]
+}

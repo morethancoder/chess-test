@@ -1,0 +1,25 @@
+{
+  "shots": [
+    "/Users/alitahseen/Demos/chess-test/.playwright/2026-11-07-chess-trainer/r2-C/start-390-light.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/2026-11-07-chess-trainer/r2-C/start-390-dark.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/2026-11-07-chess-trainer/r2-C/start-1280-light.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/2026-11-07-chess-trainer/r2-C/start-1280-dark.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/2026-11-07-chess-trainer/r2-C/midgame-390-light.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/2026-11-07-chess-trainer/r2-C/midgame-390-dark.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/2026-11-07-chess-trainer/r2-C/midgame-1280-light.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/2026-11-07-chess-trainer/r2-C/midgame-1280-dark.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/2026-11-07-chess-trainer/r2-C/solved-390-light.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/2026-11-07-chess-trainer/r2-C/solved-390-dark.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/2026-11-07-chess-trainer/r2-C/solved-1280-light.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/2026-11-07-chess-trainer/r2-C/solved-1280-dark.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/2026-11-07-chess-trainer/r2-C/promotion-390-light.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/2026-11-07-chess-trainer/r2-C/promotion-390-dark.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/2026-11-07-chess-trainer/r2-C/promotion-1280-light.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/2026-11-07-chess-trainer/r2-C/promotion-1280-dark.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/2026-11-07-chess-trainer/r2-C/mate-390-light.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/2026-11-07-chess-trainer/r2-C/mate-390-dark.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/2026-11-07-chess-trainer/r2-C/mate-1280-light.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/2026-11-07-chess-trainer/r2-C/mate-1280-dark.png"
+  ],
+  "failed": {}
+}

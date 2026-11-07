@@ -1,0 +1,32 @@
+{
+  "ms": 266587,
+  "status": "ok",
+  "pinned_model": "claude-sonnet-5-5",
+  "models_used": [
+    "claude-sonnet-5-5"
+  ],
+  "parts": [
+    {
+      "model": "sonnet",
+      "ms": 266587,
+      "step": "build",
+      "session": "6609f01d-be79-49bf-899f-e1a64f0ccff3",
+      "total_cost_usd": 0.7320730999999999,
+      "status": "ok",
+      "turns": 43,
+      "models_used": [
+        "claude-sonnet-5-5"
+      ],
+      "denied": [
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash",
+        "Bash"
+      ],
+      "exit": 0
+    }
+  ]
+}

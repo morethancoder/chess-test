@@ -1,0 +1,1336 @@
+diff --git a/NOTES.md b/NOTES.md
+new file mode 100644
+index 0000000..f904c1c
+--- /dev/null
++++ b/NOTES.md
+@@ -0,0 +1,14 @@
++# Notes
++
++Decisions where the brief left room:
++
++- **Engine** (`src/engine.ts`): own move generator, no libraries. `npm run perft` runs it with Node's built-in TypeScript support.
++- **Puzzle answers**: the move must match the stored solution, or deliver checkmate (so an alternative mate is accepted). A wrong move is not played: the squares flash red, a message shows, and the player tries again.
++- **Mate-in-2**: the defender's reply plays automatically after a short (450 ms) pause; input is locked meanwhile.
++- **Puzzle board orientation**: the side to move is at the bottom. Two-player games start with White at the bottom; there is a Flip button.
++- **Puzzle navigation**: "Next" at the last puzzle wraps to puzzle 1. `?puzzle=n` out of range falls back to puzzle 1. The URL is updated as you move between puzzles.
++- **`?fen=`**: invalid FEN starts a normal game with a notice. A FEN that is already checkmate/stalemate shows the game-over result at once.
++- **Draws**: threefold repetition counts positions with the same pieces, side to move, castling rights and (only if capturable) en passant. 50-move rule fires at a halfmove clock of 100. Checkmate takes priority over the 50-move rule. I also end the game on insufficient material (bare kings, or king + one minor piece vs king); this goes beyond the brief.
++- **Undo** (two-player mode) is an extra; it also takes back repetition history.
++- **Promotion**: tapping outside the picker or pressing Escape cancels the move.
++- Screenshots: `node scripts/screenshots.mjs` starts its own dev server and writes to `.playwright/` (git-ignored).
+diff --git a/index.html b/index.html
+index 0bca02a..2742369 100644
+--- a/index.html
++++ b/index.html
+@@ -3,6 +3,7 @@
+   <head>
+     <meta charset="UTF-8" />
+     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
++    <link rel="icon" href="data:," />
+     <title>Chess trainer</title>
+   </head>
+   <body>
+diff --git a/package.json b/package.json
+index ce53873..ac90a6f 100644
+--- a/package.json
++++ b/package.json
+@@ -7,7 +7,8 @@
+     "dev": "vite",
+     "build": "tsc && vite build",
+     "preview": "vite preview",
+-    "test": "vitest run --passWithNoTests",
++    "perft": "node src/perft.ts",
++    "test":"vitest run --passWithNoTests",
+     "e2e": "playwright test --pass-with-no-tests"
+   },
+   "devDependencies": {
+diff --git a/scripts/screenshots.mjs b/scripts/screenshots.mjs
+new file mode 100644
+index 0000000..36bf309
+--- /dev/null
++++ b/scripts/screenshots.mjs
+@@ -0,0 +1,43 @@
++// Usage: node scripts/screenshots.mjs  (starts its own dev server on $PORT or 5199, stops it at the end)
++import { spawn } from "node:child_process";
++import { chromium } from "@playwright/test";
++
++const port = process.env.PORT || 5199;
++const server = spawn("npx", ["vite"], { env: { ...process.env, PORT: String(port) }, stdio: "ignore" });
++for (let i = 0; i < 50; i++) {
++  try { await fetch("http://localhost:" + port); break; } catch { await new Promise((r) => setTimeout(r, 200)); }
++}
++const browser = await chromium.launch();
++for (const [w, h] of [[390, 844], [1280, 800]]) {
++  for (const scheme of ["light", "dark"]) {
++    const ctx = await browser.newContext({ viewport: { width: w, height: h }, colorScheme: scheme });
++    const page = await ctx.newPage();
++    const errors = [];
++    page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
++    page.on("pageerror", (e) => errors.push(String(e)));
++    const shot = (n) => page.screenshot({ path: ".playwright/" + n + "-" + w + "-" + scheme + ".png", fullPage: true });
++    await page.goto("http://localhost:" + port + "/?fen=r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R+w+KQkq+-+0+1");
++    await page.click('[data-square="e5"]');
++    await shot("game");
++    await page.goto("http://localhost:" + port + "/?puzzle=11");
++    await page.click('[data-square="g7"]');
++    await page.click('[data-square="g8"]');
++    await shot("promotion");
++    await page.click('[data-testid="promotion"] [data-piece="q"]');
++    await page.waitForSelector('[data-square="c7"] [data-piece="bK"]');
++    await page.click('[data-square="g8"]');
++    await page.click('[data-square="d8"]');
++    await shot("solved");
++    await page.goto("http://localhost:" + port + "/");
++    for (const [a, b] of [["f2", "f3"], ["e7", "e5"], ["g2", "g4"], ["d8", "h4"]]) {
++      await page.click('[data-square="' + a + '"]');
++      await page.click('[data-square="' + b + '"]');
++    }
++    await shot("checkmate");
++    const overflow = await page.evaluate(() => document.documentElement.scrollWidth > innerWidth);
++    console.log(w, scheme, "overflow:", overflow, "errors:", errors);
++    await ctx.close();
++  }
++}
++await browser.close();
++server.kill();
+diff --git a/src/engine.ts b/src/engine.ts
+new file mode 100644
+index 0000000..10782d3
+--- /dev/null
++++ b/src/engine.ts
+@@ -0,0 +1,296 @@
++// Chess rules: positions, legal move generation, game status.
++export type Color = "w" | "b";
++export type Kind = "P" | "N" | "B" | "R" | "Q" | "K";
++export type Piece = `${Color}${Kind}`;
++export type Promo = "q" | "r" | "b" | "n";
++
++export interface Position {
++  board: (Piece | null)[]; // index = rank*8 + file, a1 = 0
++  turn: Color;
++  castling: string; // subset of "KQkq"
++  ep: number; // en passant target square index, or -1
++  halfmove: number;
++  fullmove: number;
++}
++
++export interface Move {
++  from: number;
++  to: number;
++  promo?: Promo;
++}
++
++export const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
++
++export const sq = (s: string): number => (s.charCodeAt(1) - 49) * 8 + (s.charCodeAt(0) - 97);
++export const name = (i: number): string => String.fromCharCode(97 + (i % 8)) + (Math.floor(i / 8) + 1);
++
++export function parseFen(fen: string): Position {
++  const parts = fen.trim().split(/\s+/);
++  if (parts.length < 2) throw new Error("Bad FEN");
++  const rows = parts[0].split("/");
++  if (rows.length !== 8) throw new Error("Bad FEN");
++  const board: (Piece | null)[] = new Array(64).fill(null);
++  rows.forEach((row, r) => {
++    let f = 0;
++    for (const ch of row) {
++      if (/[1-8]/.test(ch)) f += Number(ch);
++      else if (/[pnbrqkPNBRQK]/.test(ch)) {
++        if (f > 7) throw new Error("Bad FEN");
++        const colour: Color = ch === ch.toUpperCase() ? "w" : "b";
++        board[(7 - r) * 8 + f++] = (colour + ch.toUpperCase()) as Piece;
++      } else throw new Error("Bad FEN");
++    }
++    if (f !== 8) throw new Error("Bad FEN");
++  });
++  if (parts[1] !== "w" && parts[1] !== "b") throw new Error("Bad FEN");
++  const turn: Color = parts[1];
++  const kings = (c: Color) => board.filter((p) => p === c + "K").length;
++  if (kings("w") !== 1 || kings("b") !== 1) throw new Error("Bad FEN");
++  const castling = (parts[2] ?? "-").replace(/[^KQkq]/g, "");
++  const ep = parts[3] && /^[a-h][36]$/.test(parts[3]) ? sq(parts[3]) : -1;
++  return { board, turn, castling, ep, halfmove: Number(parts[4]) || 0, fullmove: Number(parts[5]) || 1 };
++}
++
++export function toFen(p: Position): string {
++  const rows: string[] = [];
++  for (let r = 7; r >= 0; r--) {
++    let s = "";
++    let empty = 0;
++    for (let f = 0; f < 8; f++) {
++      const pc = p.board[r * 8 + f];
++      if (!pc) empty++;
++      else {
++        if (empty) s += empty;
++        empty = 0;
++        s += pc[0] === "w" ? pc[1] : pc[1].toLowerCase();
++      }
++    }
++    if (empty) s += empty;
++    rows.push(s);
++  }
++  const ep = p.ep >= 0 ? name(p.ep) : "-";
++  return rows.join("/") + " " + p.turn + " " + (p.castling || "-") + " " + ep + " " + p.halfmove + " " + p.fullmove;
++}
++
++const KNIGHT: [number, number][] = [[1, 2], [2, 1], [2, -1], [1, -2], [-1, -2], [-2, -1], [-2, 1], [-1, 2]];
++const KING: [number, number][] = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
++const DIAG: [number, number][] = [[1, 1], [-1, 1], [-1, -1], [1, -1]];
++const ORTH: [number, number][] = [[1, 0], [0, 1], [-1, 0], [0, -1]];
++
++export function isAttacked(board: (Piece | null)[], target: number, by: Color): boolean {
++  const tf = target % 8;
++  const tr = target >> 3;
++  const at = (f: number, r: number) => (f < 0 || f > 7 || r < 0 || r > 7 ? null : board[r * 8 + f]);
++  // an attacking pawn sits one rank behind the target, from the attacker's direction
++  const pr = by === "w" ? tr - 1 : tr + 1;
++  if (at(tf - 1, pr) === by + "P" || at(tf + 1, pr) === by + "P") return true;
++  for (const [df, dr] of KNIGHT) if (at(tf + df, tr + dr) === by + "N") return true;
++  for (const [df, dr] of KING) if (at(tf + df, tr + dr) === by + "K") return true;
++  const rays: [[number, number][], string][] = [[DIAG, "BQ"], [ORTH, "RQ"]];
++  for (const [dirs, kinds] of rays) {
++    for (const [df, dr] of dirs) {
++      let f = tf + df;
++      let r = tr + dr;
++      while (f >= 0 && f < 8 && r >= 0 && r < 8) {
++        const pc = board[r * 8 + f];
++        if (pc) {
++          if (pc[0] === by && kinds.includes(pc[1])) return true;
++          break;
++        }
++        f += df;
++        r += dr;
++      }
++    }
++  }
++  return false;
++}
++
++const other = (c: Color): Color => (c === "w" ? "b" : "w");
++const kingSquare = (board: (Piece | null)[], c: Color) => board.indexOf((c + "K") as Piece);
++
++export function inCheck(p: Position, c: Color = p.turn): boolean {
++  return isAttacked(p.board, kingSquare(p.board, c), other(c));
++}
++
++/** Apply a move without checking legality. Handles castling, en passant, promotion. */
++export function applyMove(p: Position, m: Move): Position {
++  const board = p.board.slice();
++  const piece = board[m.from]!;
++  const colour = piece[0] as Color;
++  const captured = board[m.to];
++  board[m.to] = m.promo ? ((colour + m.promo.toUpperCase()) as Piece) : piece;
++  board[m.from] = null;
++  let ep = -1;
++  if (piece[1] === "P") {
++    if (m.to === p.ep) board[m.to + (colour === "w" ? -8 : 8)] = null;
++    if (Math.abs(m.to - m.from) === 16) ep = (m.to + m.from) / 2;
++  }
++  if (piece[1] === "K" && Math.abs(m.to - m.from) === 2) {
++    const rank = m.from & ~7;
++    if (m.to > m.from) {
++      board[rank + 5] = board[rank + 7];
++      board[rank + 7] = null;
++    } else {
++      board[rank + 3] = board[rank];
++      board[rank] = null;
++    }
++  }
++  let castling = p.castling;
++  const strip = (s: string) => {
++    for (const ch of s) castling = castling.replace(ch, "");
++  };
++  if (piece[1] === "K") strip(colour === "w" ? "KQ" : "kq");
++  for (const s of [m.from, m.to]) {
++    if (s === 0) strip("Q");
++    else if (s === 7) strip("K");
++    else if (s === 56) strip("q");
++    else if (s === 63) strip("k");
++  }
++  return {
++    board,
++    turn: other(colour),
++    castling,
++    ep,
++    halfmove: piece[1] === "P" || captured ? 0 : p.halfmove + 1,
++    fullmove: p.fullmove + (colour === "b" ? 1 : 0),
++  };
++}
++
++function pseudoMoves(p: Position): Move[] {
++  const out: Move[] = [];
++  const { board, turn } = p;
++  const add = (from: number, to: number, promo = false) => {
++    if (promo) for (const k of ["q", "r", "b", "n"] as const) out.push({ from, to, promo: k });
++    else out.push({ from, to });
++  };
++  for (let from = 0; from < 64; from++) {
++    const pc = board[from];
++    if (!pc || pc[0] !== turn) continue;
++    const f = from % 8;
++    const r = from >> 3;
++    const kind = pc[1] as Kind;
++    if (kind === "P") {
++      const dir = turn === "w" ? 1 : -1;
++      const startRank = turn === "w" ? 1 : 6;
++      const lastRank = turn === "w" ? 7 : 0;
++      const r1 = r + dir;
++      if (r1 < 0 || r1 > 7) continue;
++      if (!board[r1 * 8 + f]) {
++        add(from, r1 * 8 + f, r1 === lastRank);
++        if (r === startRank && !board[(r + 2 * dir) * 8 + f]) add(from, (r + 2 * dir) * 8 + f);
++      }
++      for (const df of [-1, 1]) {
++        const nf = f + df;
++        if (nf < 0 || nf > 7) continue;
++        const t = r1 * 8 + nf;
++        const tp = board[t];
++        if ((tp && tp[0] !== turn) || t === p.ep) add(from, t, r1 === lastRank);
++      }
++    } else if (kind === "N" || kind === "K") {
++      for (const [df, dr] of kind === "N" ? KNIGHT : KING) {
++        const nf = f + df;
++        const nr = r + dr;
++        if (nf < 0 || nf > 7 || nr < 0 || nr > 7) continue;
++        const tp = board[nr * 8 + nf];
++        if (!tp || tp[0] !== turn) add(from, nr * 8 + nf);
++      }
++    } else {
++      const dirs = kind === "B" ? DIAG : kind === "R" ? ORTH : [...DIAG, ...ORTH];
++      for (const [df, dr] of dirs) {
++        let nf = f + df;
++        let nr = r + dr;
++        while (nf >= 0 && nf < 8 && nr >= 0 && nr < 8) {
++          const tp = board[nr * 8 + nf];
++          if (!tp) add(from, nr * 8 + nf);
++          else {
++            if (tp[0] !== turn) add(from, nr * 8 + nf);
++            break;
++          }
++          nf += df;
++          nr += dr;
++        }
++      }
++    }
++  }
++  // castling: king and rook unmoved (rights), squares empty, king not in/through/into check
++  const rank = turn === "w" ? 0 : 56;
++  const enemy = other(turn);
++  if (board[rank + 4] === turn + "K" && !isAttacked(board, rank + 4, enemy)) {
++    const k = turn === "w" ? "K" : "k";
++    const q = turn === "w" ? "Q" : "q";
++    if (
++      p.castling.includes(k) && board[rank + 7] === turn + "R" &&
++      !board[rank + 5] && !board[rank + 6] &&
++      !isAttacked(board, rank + 5, enemy) && !isAttacked(board, rank + 6, enemy)
++    ) out.push({ from: rank + 4, to: rank + 6 });
++    if (
++      p.castling.includes(q) && board[rank] === turn + "R" &&
++      !board[rank + 1] && !board[rank + 2] && !board[rank + 3] &&
++      !isAttacked(board, rank + 3, enemy) && !isAttacked(board, rank + 2, enemy)
++    ) out.push({ from: rank + 4, to: rank + 2 });
++  }
++  return out;
++}
++
++export function legalMoves(p: Position): Move[] {
++  return pseudoMoves(p).filter((m) => {
++    const n = applyMove(p, m);
++    return !isAttacked(n.board, kingSquare(n.board, p.turn), n.turn);
++  });
++}
++
++export function perft(p: Position, depth: number): number {
++  if (depth === 0) return 1;
++  const moves = legalMoves(p);
++  if (depth === 1) return moves.length;
++  let n = 0;
++  for (const m of moves) n += perft(applyMove(p, m), depth - 1);
++  return n;
++}
++
++export const toUci = (m: Move): string => name(m.from) + name(m.to) + (m.promo ?? "");
++
++export function parseUci(p: Position, uci: string): Move | undefined {
++  return legalMoves(p).find((m) => toUci(m) === uci);
++}
++
++/** Repetition key: placement, side, castling, and ep only if an en passant capture is legal. */
++export function repetitionKey(p: Position): string {
++  const epLegal = p.ep >= 0 && legalMoves(p).some((m) => m.to === p.ep && p.board[m.from]![1] === "P");
++  const [placement, turn, castling] = toFen(p).split(" ");
++  return placement + " " + turn + " " + castling + " " + (epLegal ? name(p.ep) : "-");
++}
++
++export function insufficientMaterial(p: Position): boolean {
++  const rest = p.board.filter((x) => x && x[1] !== "K") as Piece[];
++  if (rest.length === 0) return true;
++  return rest.length === 1 && (rest[0][1] === "N" || rest[0][1] === "B");
++}
++
++export type Outcome =
++  | { over: false }
++  | { over: true; kind: "checkmate"; winner: Color }
++  | { over: true; kind: "stalemate" | "threefold" | "fifty-move" | "insufficient" };
++
++/** `keys` holds the repetition keys of every position so far, including the current one. */
++export function outcome(p: Position, keys: string[]): Outcome {
++  if (legalMoves(p).length === 0) {
++    return inCheck(p) ? { over: true, kind: "checkmate", winner: other(p.turn) } : { over: true, kind: "stalemate" };
++  }
++  if (insufficientMaterial(p)) return { over: true, kind: "insufficient" };
++  const key = repetitionKey(p);
++  if (keys.filter((k) => k === key).length >= 3) return { over: true, kind: "threefold" };
++  if (p.halfmove >= 100) return { over: true, kind: "fifty-move" };
++  return { over: false };
++}
++
++export function resultText(o: Outcome): string {
++  if (!o.over) return "";
++  switch (o.kind) {
++    case "checkmate": return "Checkmate — " + (o.winner === "w" ? "White" : "Black") + " wins";
++    case "stalemate": return "Draw by stalemate";
++    case "threefold": return "Draw by threefold repetition";
++    case "fifty-move": return "Draw by the 50-move rule";
++    case "insufficient": return "Draw by insufficient material";
++  }
++}
+diff --git a/src/main.ts b/src/main.ts
+index 67aeb67..8104398 100644
+--- a/src/main.ts
++++ b/src/main.ts
+@@ -1,2 +1,398 @@
+-// Entry point. The app is built here.
+-export {};
++import "./style.css";
++import {
++  START_FEN, applyMove, inCheck, legalMoves, name, outcome, parseFen, parseUci, repetitionKey, resultText, sq, toFen, toUci,
++  type Color, type Move, type Position, type Promo,
++} from "./engine.ts";
++import { PROMO_LABEL, pieceSvg } from "./pieces.ts";
++
++interface Puzzle {
++  id: number;
++  type: string;
++  fen: string;
++  solution: string[];
++}
++
++type Mode = "game" | "puzzle";
++
++interface State {
++  mode: Mode;
++  positions: Position[];
++  moves: Move[];
++  keys: string[];
++  selected: number; // square index or -1
++  pending: Move[] | null; // promotion choices awaiting a pick
++  flipped: boolean;
++  // puzzle
++  puzzles: Puzzle[];
++  puzzleIndex: number;
++  step: number;
++  solved: boolean;
++  wrong: { from: number; to: number } | null;
++  replying: boolean;
++  notice: string;
++}
++
++const app = document.getElementById("app")!;
++const state: State = {
++  mode: "game", positions: [], moves: [], keys: [], selected: -1, pending: null, flipped: false,
++  puzzles: [], puzzleIndex: 0, step: 0, solved: false, wrong: null, replying: false, notice: "",
++};
++
++const cur = () => state.positions[state.positions.length - 1];
++const lastMove = () => state.moves[state.moves.length - 1];
++const colourName = (c: Color) => (c === "w" ? "White" : "Black");
++
++function startGame(fen: string) {
++  state.mode = "game";
++  state.positions = [parseFen(fen)];
++  state.moves = [];
++  state.keys = [repetitionKey(state.positions[0])];
++  state.selected = -1;
++  state.pending = null;
++  state.flipped = false;
++  state.notice = "";
++  syncUrl();
++  render();
++}
++
++function startPuzzle(index: number) {
++  const n = state.puzzles.length;
++  state.mode = "puzzle";
++  state.puzzleIndex = ((index % n) + n) % n;
++  const p = parseFen(state.puzzles[state.puzzleIndex].fen);
++  state.positions = [p];
++  state.moves = [];
++  state.keys = [repetitionKey(p)];
++  state.selected = -1;
++  state.pending = null;
++  state.step = 0;
++  state.solved = false;
++  state.wrong = null;
++  state.replying = false;
++  state.flipped = p.turn === "b";
++  state.notice = "";
++  syncUrl();
++  render();
++}
++
++function syncUrl() {
++  const url = new URL(location.href);
++  url.search = "";
++  if (state.mode === "puzzle") url.searchParams.set("puzzle", String(state.puzzleIndex + 1));
++  history.replaceState(null, "", url);
++}
++
++function gameOutcome() {
++  return outcome(cur(), state.keys);
++}
++
++function targetsFrom(from: number): Move[] {
++  return legalMoves(cur()).filter((m) => m.from === from);
++}
++
++function canMove(): boolean {
++  if (state.pending) return false;
++  if (state.mode === "puzzle") return !state.solved && !state.replying;
++  return !gameOutcome().over;
++}
++
++function commit(m: Move) {
++  const next = applyMove(cur(), m);
++  state.positions.push(next);
++  state.moves.push(m);
++  state.keys.push(repetitionKey(next));
++  state.selected = -1;
++  state.wrong = null;
++}
++
++function tryMove(from: number, to: number) {
++  const options = targetsFrom(from).filter((m) => m.to === to);
++  if (options.length === 0) return;
++  if (options[0].promo) {
++    state.pending = options;
++    render();
++    return;
++  }
++  playMove(options[0]);
++}
++
++function playMove(m: Move) {
++  state.pending = null;
++  if (state.mode === "game") {
++    commit(m);
++    render();
++    return;
++  }
++  const puzzle = state.puzzles[state.puzzleIndex];
++  const after = applyMove(cur(), m);
++  const mates = legalMoves(after).length === 0 && inCheck(after);
++  if (toUci(m) === puzzle.solution[state.step] || mates) {
++    commit(m);
++    state.step += 1;
++    if (mates || state.step >= puzzle.solution.length) {
++      state.solved = true;
++      state.notice = "";
++    } else {
++      state.replying = true;
++      state.notice = "Correct — the defender replies…";
++      setTimeout(() => {
++        const reply = parseUci(cur(), puzzle.solution[state.step]);
++        if (reply) commit(reply);
++        state.step += 1;
++        state.replying = false;
++        state.notice = "";
++        render();
++      }, 450);
++    }
++  } else {
++    state.wrong = { from: m.from, to: m.to };
++    state.selected = -1;
++    state.notice = "That's not the solution — try again.";
++  }
++  render();
++}
++
++// ---------- rendering ----------
++
++function statusText(): { text: string; tone: string } {
++  const p = cur();
++  if (state.mode === "puzzle") {
++    if (state.solved) return { text: "Solved!", tone: "good" };
++    if (state.wrong) return { text: state.notice, tone: "bad" };
++    if (state.notice) return { text: state.notice, tone: "" };
++    const kind = state.puzzles[state.puzzleIndex].type === "mate-in-1" ? "Mate in 1" : "Mate in 2";
++    return { text: colourName(p.turn) + " to move — " + kind, tone: "" };
++  }
++  const o = gameOutcome();
++  if (o.over) return { text: resultText(o), tone: "" };
++  if (state.notice) return { text: state.notice, tone: "bad" };
++  return { text: colourName(p.turn) + " to move" + (inCheck(p) ? " — check!" : ""), tone: inCheck(p) ? "bad" : "" };
++}
++
++function boardHtml(): string {
++  const p = cur();
++  const sel = state.selected;
++  const targets = sel >= 0 ? targetsFrom(sel) : [];
++  const targetSet = new Set(targets.map((m) => m.to));
++  const last = lastMove();
++  const checked = inCheck(p) ? p.board.indexOf((p.turn + "K") as "wK") : -1;
++  let html = "";
++  for (let row = 0; row < 8; row++) {
++    for (let col = 0; col < 8; col++) {
++      const rank = state.flipped ? row : 7 - row;
++      const file = state.flipped ? 7 - col : col;
++      const i = rank * 8 + file;
++      const cls = ["sq", (rank + file) % 2 === 0 ? "dark" : "light"];
++      if (i === sel) cls.push("selected");
++      if (last && (i === last.from || i === last.to)) cls.push("last");
++      if (i === checked) cls.push("check");
++      if (state.wrong && (i === state.wrong.from || i === state.wrong.to)) cls.push("wrong");
++      if (targetSet.has(i)) cls.push(p.board[i] || (p.board[sel] && p.board[sel]![1] === "P" && i === p.ep) ? "capture" : "target");
++      const piece = p.board[i];
++      const coord =
++        (col === 0 ? '<span class="rank">' + (rank + 1) + "</span>" : "") +
++        (row === 7 ? '<span class="file">' + String.fromCharCode(97 + file) + "</span>" : "");
++      html += '<div class="' + cls.join(" ") + '" data-square="' + name(i) + '">' + coord + (piece ? pieceSvg(piece) : "") + "</div>";
++    }
++  }
++  return html;
++}
++
++function promotionHtml(): string {
++  if (!state.pending) return "";
++  const colour = cur().turn;
++  const buttons = state.pending
++    .map((m) => {
++      const k = m.promo as Promo;
++      return (
++        '<button type="button" data-piece="' + k + '" aria-label="' + PROMO_LABEL[k] + '" title="' + PROMO_LABEL[k] + '">' +
++        pieceSvg((colour + k.toUpperCase()) as "wQ").replace(' data-piece="' + colour + k.toUpperCase() + '"', "") +
++        "</button>"
++      );
++    })
++    .join("");
++  return (
++    '<div class="promo-backdrop"><div class="promo" data-testid="promotion" role="dialog" aria-label="Choose promotion piece">' +
++    "<p>Promote to</p><div>" + buttons + "</div></div></div>"
++  );
++}
++
++function sideHtml(): string {
++  const st = statusText();
++  let html = '<p class="status ' + st.tone + '" role="status" data-testid="status">' + st.text + "</p>";
++  if (state.mode === "game") {
++    const o = gameOutcome();
++    if (o.over) {
++      html += '<div class="card result" data-testid="game-over"><strong>' + resultText(o) + '</strong><button type="button" data-action="new">New game</button></div>';
++    }
++    html +=
++      '<div class="actions"><button type="button" data-action="undo"' + (state.moves.length ? "" : " disabled") + ">Undo</button>" +
++      '<button type="button" data-action="flip">Flip board</button>' +
++      (o.over ? "" : '<button type="button" data-action="new">New game</button>') + "</div>";
++  } else {
++    const n = state.puzzles.length;
++    if (state.solved) {
++      const lastOne = state.puzzleIndex === n - 1;
++      html +=
++        '<div class="card result" data-testid="puzzle-solved"><strong>Puzzle solved!</strong>' +
++        '<button type="button" data-action="next-puzzle">' + (lastOne ? "Back to puzzle 1" : "Next puzzle") + "</button></div>";
++    }
++    html +=
++      '<div class="actions"><button type="button" data-action="prev-puzzle">Previous</button>' +
++      '<button type="button" data-action="reset-puzzle">Restart</button>' +
++      '<button type="button" data-action="next-puzzle">Next</button></div>';
++  }
++  return html;
++}
++
++function render() {
++  const puzzleTitle = state.mode === "puzzle" ? "Puzzle " + (state.puzzleIndex + 1) + " of " + state.puzzles.length : "Two players";
++  const hasPuzzles = state.puzzles.length > 0;
++  app.innerHTML =
++    '<header><h1>Chess trainer</h1><nav aria-label="Mode">' +
++    '<button type="button" data-action="mode-game" aria-pressed="' + (state.mode === "game") + '">Two players</button>' +
++    '<button type="button" data-action="mode-puzzle" aria-pressed="' + (state.mode === "puzzle") + '"' + (hasPuzzles ? "" : " disabled") + ">Puzzles</button>" +
++    "</nav></header>" +
++    '<main><div class="board-wrap"><div class="board" data-testid="board">' + boardHtml() + "</div>" + promotionHtml() + "</div>" +
++    '<section class="side"><h2>' + puzzleTitle + "</h2>" + sideHtml() + "</section></main>";
++}
++
++// ---------- input ----------
++
++let drag: { from: number; x: number; y: number; ghost: HTMLElement | null; id: number } | null = null;
++
++const squareAt = (el: Element | null): number => {
++  const s = el?.closest<HTMLElement>("[data-square]");
++  return s ? sq(s.dataset.square!) : -1;
++};
++
++app.addEventListener("pointerdown", (e) => {
++  const board = (e.target as Element).closest(".board");
++  if (!board || e.button > 0 || !canMove()) return;
++  const i = squareAt(e.target as Element);
++  if (i < 0) return;
++  const p = cur();
++  if (state.selected >= 0 && targetsFrom(state.selected).some((m) => m.to === i)) {
++    tryMove(state.selected, i);
++    return;
++  }
++  const piece = p.board[i];
++  if (piece && piece[0] === p.turn) {
++    e.preventDefault();
++    state.selected = i;
++    state.wrong = null;
++    if (state.mode === "puzzle" && !state.solved) state.notice = "";
++    render();
++    drag = { from: i, x: e.clientX, y: e.clientY, ghost: null, id: e.pointerId };
++  } else if (state.selected >= 0) {
++    state.selected = -1;
++    render();
++  }
++});
++
++window.addEventListener("pointermove", (e) => {
++  if (!drag || e.pointerId !== drag.id) return;
++  if (!drag.ghost) {
++    if (Math.hypot(e.clientX - drag.x, e.clientY - drag.y) < 6) return;
++    const src = app.querySelector<HTMLElement>('[data-square="' + name(drag.from) + '"] .piece');
++    if (!src) return;
++    const size = src.getBoundingClientRect().width;
++    const ghost = src.cloneNode(true) as HTMLElement;
++    ghost.removeAttribute("data-piece");
++    ghost.classList.add("ghost");
++    ghost.style.width = ghost.style.height = size + "px";
++    document.body.appendChild(ghost);
++    src.classList.add("lifted");
++    drag.ghost = ghost;
++  }
++  const size = drag.ghost.getBoundingClientRect().width;
++  drag.ghost.style.transform = "translate(" + (e.clientX - size / 2) + "px," + (e.clientY - size / 2) + "px)";
++});
++
++function endDrag(e: PointerEvent, cancelled: boolean) {
++  if (!drag || e.pointerId !== drag.id) return;
++  const d = drag;
++  drag = null;
++  if (!d.ghost) return;
++  d.ghost.remove();
++  const target = cancelled ? -1 : squareAt(document.elementFromPoint(e.clientX, e.clientY));
++  if (target >= 0 && target !== d.from) tryMove(d.from, target);
++  else render();
++}
++window.addEventListener("pointerup", (e) => endDrag(e, false));
++window.addEventListener("pointercancel", (e) => endDrag(e, true));
++
++app.addEventListener("click", (e) => {
++  const el = e.target as Element;
++  const promo = el.closest<HTMLElement>(".promo button");
++  if (promo && state.pending) {
++    const m = state.pending.find((x) => x.promo === promo.dataset.piece);
++    if (m) playMove(m);
++    return;
++  }
++  if (el.classList.contains("promo-backdrop")) {
++    state.pending = null;
++    state.selected = -1;
++    render();
++    return;
++  }
++  const action = el.closest<HTMLElement>("[data-action]")?.dataset.action;
++  switch (action) {
++    case "new": startGame(START_FEN); break;
++    case "undo":
++      if (state.moves.length) {
++        state.positions.pop();
++        state.moves.pop();
++        state.keys.pop();
++        state.selected = -1;
++        render();
++      }
++      break;
++    case "flip": state.flipped = !state.flipped; render(); break;
++    case "mode-game": if (state.mode !== "game") startGame(START_FEN); break;
++    case "mode-puzzle": if (state.mode !== "puzzle") startPuzzle(0); break;
++    case "next-puzzle": startPuzzle(state.puzzleIndex + 1); break;
++    case "prev-puzzle": startPuzzle(state.puzzleIndex - 1); break;
++    case "reset-puzzle": startPuzzle(state.puzzleIndex); break;
++  }
++});
++
++window.addEventListener("keydown", (e) => {
++  if (e.key === "Escape" && (state.pending || state.selected >= 0)) {
++    state.pending = null;
++    state.selected = -1;
++    render();
++  }
++});
++
++// ---------- boot ----------
++
++async function boot() {
++  try {
++    const res = await fetch(import.meta.env.BASE_URL + "puzzles.json");
++    state.puzzles = await res.json();
++  } catch {
++    state.puzzles = [];
++  }
++  const params = new URLSearchParams(location.search);
++  const puzzleParam = params.get("puzzle");
++  const fen = params.get("fen");
++  if (puzzleParam !== null && state.puzzles.length) {
++    const n = Number.parseInt(puzzleParam, 10);
++    startPuzzle(Number.isFinite(n) && n >= 1 && n <= state.puzzles.length ? n - 1 : 0);
++  } else if (fen) {
++    try {
++      startGame(fen);
++      // keep ?fen in the address so a reload gives the same position
++      history.replaceState(null, "", "?fen=" + encodeURIComponent(toFen(state.positions[0])).replace(/%20/g, "+"));
++    } catch {
++      startGame(START_FEN);
++      state.notice = "That FEN was not valid — started a new game.";
++      render();
++    }
++  } else {
++    startGame(START_FEN);
++  }
++}
++
++boot();
+diff --git a/src/perft.ts b/src/perft.ts
+new file mode 100644
+index 0000000..ade36dd
+--- /dev/null
++++ b/src/perft.ts
+@@ -0,0 +1,7 @@
++import { parseFen, perft } from "./engine.ts";
++
++// Run by Node directly (`npm run perft`); no @types/node needed.
++declare const process: { argv: string[] };
++
++const [fen, depth] = process.argv.slice(2);
++console.log(perft(parseFen(fen), Number(depth)));
+diff --git a/src/pieces.ts b/src/pieces.ts
+new file mode 100644
+index 0000000..4a72e79
+--- /dev/null
++++ b/src/pieces.ts
+@@ -0,0 +1,46 @@
++// Original piece art, drawn as SVG shapes on a 100x100 canvas. Colours come from CSS variables.
++import type { Piece } from "./engine.ts";
++
++const BASE = '<rect x="22" y="76" width="56" height="12" rx="5"/>';
++
++const SHAPES: Record<string, string> = {
++  P:
++    BASE +
++    '<path d="M36 76 C38 62 42 54 44 47 H56 C58 54 62 62 64 76 Z"/>' +
++    '<rect x="36" y="42" width="28" height="7" rx="3.5"/>' +
++    '<circle cx="50" cy="31" r="12"/>',
++  R:
++    BASE +
++    '<path d="M31 76 L35 42 H65 L69 76 Z"/>' +
++    '<path d="M28 42 V20 H38 V27 H45 V20 H55 V27 H62 V20 H72 V42 Z"/>',
++  N:
++    BASE +
++    '<path d="M30 76 C30 58 38 48 47 40 L40 35 L42 22 L51 28 C65 22 77 38 72 58 L70 76 Z"/>' +
++    '<circle cx="54" cy="37" r="2.6" class="mark"/>' +
++    '<path d="M38 52 C42 50 45 47 47 44" class="line"/>',
++  B:
++    BASE +
++    '<path d="M35 76 C38 62 42 58 44 52 H56 C58 58 62 62 65 76 Z"/>' +
++    '<ellipse cx="50" cy="36" rx="12" ry="17"/>' +
++    '<circle cx="50" cy="14" r="5"/>' +
++    '<path d="M50 28 L58 38" class="line"/>',
++  Q:
++    BASE +
++    '<path d="M26 76 L20 34 L34 52 L35 26 L44 50 L50 22 L56 50 L65 26 L66 52 L80 34 L74 76 Z"/>' +
++    '<circle cx="20" cy="31" r="4.5"/><circle cx="35" cy="22" r="4.5"/><circle cx="50" cy="18" r="4.5"/>' +
++    '<circle cx="65" cy="22" r="4.5"/><circle cx="80" cy="31" r="4.5"/>',
++  K:
++    BASE +
++    '<path d="M29 76 C28 62 34 54 38 48 H62 C66 54 72 62 71 76 Z"/>' +
++    '<path d="M34 48 C34 40 42 36 50 38 C58 36 66 40 66 48 Z"/>' +
++    '<path d="M46 8 H54 V15 H61 V23 H54 V38 H46 V23 H39 V15 H46 Z"/>',
++};
++
++export function pieceSvg(piece: Piece): string {
++  return (
++    '<svg class="piece" data-piece="' + piece + '" viewBox="0 0 100 100" aria-hidden="true">' +
++    '<g class="art ' + (piece[0] === "w" ? "white" : "black") + '">' + SHAPES[piece[1]] + "</g></svg>"
++  );
++}
++
++export const PROMO_LABEL = { q: "Queen", r: "Rook", b: "Bishop", n: "Knight" } as const;
+diff --git a/src/style.css b/src/style.css
+new file mode 100644
+index 0000000..a461ad2
+--- /dev/null
++++ b/src/style.css
+@@ -0,0 +1,181 @@
++:root {
++  color-scheme: light dark;
++  --bg: #f4f1ea;
++  --fg: #231f1b;
++  --muted: #6b645b;
++  --card: #fffdf8;
++  --line: #d8d1c4;
++  --accent: #2f6f5e;
++  --accent-fg: #ffffff;
++  --sq-light: #ecdfc4;
++  --sq-dark: #a9835a;
++  --hl-select: rgba(255, 214, 10, 0.65);
++  --hl-last: rgba(255, 214, 10, 0.38);
++  --hl-check: rgba(214, 40, 40, 0.75);
++  --hl-wrong: rgba(214, 40, 40, 0.55);
++  --dot: rgba(30, 30, 30, 0.35);
++  --good: #1f7a45;
++  --bad: #b3261e;
++  --white-fill: #fffaf0;
++  --white-stroke: #2a2420;
++  --black-fill: #4b4655;
++  --black-stroke: #14121a;
++}
++
++@media (prefers-color-scheme: dark) {
++  :root {
++    --bg: #17181c;
++    --fg: #ece8df;
++    --muted: #a09a90;
++    --card: #22242a;
++    --line: #373a42;
++    --accent: #5fb89f;
++    --accent-fg: #0d1512;
++    --sq-light: #8a8f9c;
++    --sq-dark: #4d5463;
++    --hl-select: rgba(255, 214, 10, 0.5);
++    --hl-last: rgba(255, 214, 10, 0.3);
++    --dot: rgba(255, 255, 255, 0.4);
++    --good: #6fd39a;
++    --bad: #ff8a80;
++    --white-fill: #f7f1e3;
++    --white-stroke: #0f0e12;
++    --black-fill: #2a2733;
++    --black-stroke: #e9e4d6;
++  }
++}
++
++* { box-sizing: border-box; }
++
++html, body { margin: 0; }
++
++body {
++  background: var(--bg);
++  color: var(--fg);
++  font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
++  overflow-x: hidden;
++}
++
++#app {
++  max-width: 1100px;
++  margin: 0 auto;
++  padding: 12px;
++}
++
++header {
++  display: flex;
++  flex-wrap: wrap;
++  align-items: center;
++  justify-content: space-between;
++  gap: 8px 16px;
++  margin-bottom: 12px;
++}
++
++h1 { font-size: 1.3rem; margin: 0; }
++h2 { font-size: 1rem; margin: 0 0 8px; color: var(--muted); font-weight: 600; }
++
++nav { display: flex; gap: 4px; padding: 3px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
++nav button { border: 0; background: transparent; }
++nav button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); }
++
++button {
++  font: inherit;
++  color: var(--fg);
++  background: var(--card);
++  border: 1px solid var(--line);
++  border-radius: 8px;
++  padding: 8px 14px;
++  min-height: 40px;
++  cursor: pointer;
++}
++button:hover:not(:disabled) { border-color: var(--accent); }
++button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
++button:disabled { opacity: 0.45; cursor: default; }
++
++main { display: flex; flex-direction: column; gap: 14px; align-items: center; }
++
++.board-wrap {
++  position: relative;
++  width: min(100%, 640px, calc(100vh - 140px));
++  min-width: min(100%, 280px);
++}
++
++.board {
++  display: grid;
++  grid-template-columns: repeat(8, minmax(0, 1fr));
++  grid-template-rows: repeat(8, minmax(0, 1fr));
++  aspect-ratio: 1;
++  width: 100%;
++  border-radius: 6px;
++  overflow: hidden;
++  border: 2px solid var(--line);
++  touch-action: none;
++  user-select: none;
++  -webkit-user-select: none;
++}
++
++.sq { position: relative; display: flex; align-items: center; justify-content: center; min-width: 0; }
++.sq.light { background: var(--sq-light); }
++.sq.dark { background: var(--sq-dark); }
++.sq.last::before, .sq.selected::before, .sq.check::before, .sq.wrong::before { content: ""; position: absolute; inset: 0; }
++.sq.last::before { background: var(--hl-last); }
++.sq.selected::before { background: var(--hl-select); }
++.sq.check::before { background: radial-gradient(circle, var(--hl-check) 30%, transparent 75%); }
++.sq.wrong::before { background: var(--hl-wrong); }
++.sq.target::after {
++  content: ""; position: absolute; width: 28%; height: 28%; border-radius: 50%; background: var(--dot); pointer-events: none;
++}
++.sq.capture::after {
++  content: ""; position: absolute; inset: 4%; border-radius: 50%; border: 5px solid var(--dot); pointer-events: none;
++}
++.sq .rank, .sq .file { position: absolute; font-size: clamp(8px, 1.9vw, 12px); font-weight: 700; opacity: 0.75; pointer-events: none; }
++.sq .rank { top: 2px; left: 3px; }
++.sq .file { bottom: 1px; right: 3px; }
++.sq.light .rank, .sq.light .file { color: var(--sq-dark); }
++.sq.dark .rank, .sq.dark .file { color: var(--sq-light); }
++
++.piece { width: 92%; height: 92%; position: relative; pointer-events: none; display: block; }
++.piece .lifted, .piece.lifted { opacity: 0.3; }
++.art { stroke-width: 3.2; stroke-linejoin: round; stroke-linecap: round; }
++.art.white { fill: var(--white-fill); stroke: var(--white-stroke); }
++.art.black { fill: var(--black-fill); stroke: var(--black-stroke); }
++.art .mark { fill: currentColor; stroke: none; }
++.art.white .mark { fill: var(--white-stroke); }
++.art.black .mark { fill: var(--black-stroke); }
++.art .line { fill: none; }
++
++.ghost { position: fixed; left: 0; top: 0; z-index: 50; pointer-events: none; filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.4)); }
++
++.side { width: 100%; max-width: 640px; }
++.status { font-size: 1.1rem; font-weight: 600; margin: 0 0 10px; min-height: 1.5em; }
++.status.good { color: var(--good); }
++.status.bad { color: var(--bad); }
++.actions { display: flex; flex-wrap: wrap; gap: 8px; }
++.card {
++  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;
++  background: var(--card); border: 1px solid var(--line); border-left: 5px solid var(--good);
++  border-radius: 10px; padding: 12px 14px; margin-bottom: 12px;
++}
++.card button { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
++
++.promo-backdrop {
++  position: absolute; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center;
++  background: rgba(0, 0, 0, 0.45); border-radius: 6px;
++}
++.promo { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; text-align: center; }
++.promo p { margin: 0 0 8px; font-weight: 600; }
++.promo > div { display: flex; gap: 6px; }
++.promo button { width: 60px; height: 60px; padding: 4px; background: var(--sq-light); }
++.promo button .piece { width: 100%; height: 100%; }
++
++@media (min-width: 900px) {
++  #app { padding: 24px; }
++  main { flex-direction: row; align-items: flex-start; justify-content: center; gap: 28px; }
++  .board-wrap { flex: 0 1 640px; }
++  .side { flex: 0 0 280px; width: 280px; }
++}
++
++@media (max-width: 420px) {
++  #app { padding: 8px; }
++  .promo button { width: 52px; height: 52px; }
++}
+diff --git a/tests/e2e/app.spec.ts b/tests/e2e/app.spec.ts
+new file mode 100644
+index 0000000..c10151f
+--- /dev/null
++++ b/tests/e2e/app.spec.ts
+@@ -0,0 +1,95 @@
++import { expect, test, type Page } from "@playwright/test";
++
++const sqr = (page: Page, s: string) => page.locator('[data-square="' + s + '"]');
++async function move(page: Page, from: string, to: string) {
++  await sqr(page, from).click();
++  await sqr(page, to).click();
++}
++
++test.beforeEach(async ({ page }) => {
++  page.on("console", (m) => {
++    if (m.type() === "error") throw new Error("console error: " + m.text());
++  });
++  page.on("pageerror", (e) => {
++    throw e;
++  });
++});
++
++test("solves a mate-in-1 puzzle, wrong move is flagged and retried", async ({ page }) => {
++  await page.goto("/?puzzle=1");
++  await expect(sqr(page, "e6").locator('[data-piece="wQ"]')).toBeVisible();
++  await move(page, "e6", "e1"); // legal but wrong
++  await expect(page.getByTestId("status")).toContainText("try again");
++  await expect(sqr(page, "e6").locator('[data-piece="wQ"]')).toBeVisible();
++  await expect(page.getByTestId("puzzle-solved")).toHaveCount(0);
++  await move(page, "e6", "h3");
++  await expect(page.getByTestId("puzzle-solved")).toBeVisible();
++  await page.getByTestId("puzzle-solved").getByRole("button").click();
++  await expect(page).toHaveURL(/puzzle=2/);
++  await expect(page.getByTestId("puzzle-solved")).toHaveCount(0);
++});
++
++test("solves a mate-in-2 puzzle with the automatic reply", async ({ page }) => {
++  await page.goto("/?puzzle=7");
++  await move(page, "a5", "c7");
++  await expect(sqr(page, "d4").locator('[data-piece="bP"]')).toBeVisible(); // defender replied d5d4
++  await move(page, "a3", "a8");
++  await expect(page.getByTestId("puzzle-solved")).toBeVisible();
++});
++
++test("puzzle with promotion uses the picker", async ({ page }) => {
++  await page.goto("/?puzzle=11");
++  await move(page, "g7", "g8");
++  const picker = page.getByTestId("promotion");
++  await expect(picker.locator("button")).toHaveCount(4);
++  await picker.locator('[data-piece="q"]').click();
++  await expect(sqr(page, "c7").locator('[data-piece="bK"]')).toBeVisible(); // defender replied
++  await move(page, "g8", "d8");
++  await expect(sqr(page, "d8").locator('[data-piece="wQ"]')).toBeVisible();
++  await expect(page.getByTestId("puzzle-solved")).toBeVisible();
++});
++
++test("plays a two-player game to checkmate", async ({ page }) => {
++  await page.goto("/");
++  await expect(page.locator("[data-piece]")).toHaveCount(32);
++  await move(page, "f2", "f3");
++  await move(page, "e7", "e5");
++  await move(page, "g2", "g4");
++  await move(page, "d8", "h4");
++  const over = page.getByTestId("game-over");
++  await expect(over).toBeVisible();
++  await expect(over).toContainText("Checkmate");
++  await expect(over).toContainText("Black wins");
++});
++
++test("tap shows targets, illegal tap does nothing, drag moves", async ({ page }) => {
++  await page.goto("/");
++  await sqr(page, "e2").click();
++  await expect(page.locator(".sq.target")).toHaveCount(2);
++  await expect(sqr(page, "e2")).toHaveClass(/selected/);
++  await sqr(page, "e5").click();
++  await expect(sqr(page, "e2").locator('[data-piece="wP"]')).toBeVisible();
++  await sqr(page, "e2").dragTo(sqr(page, "e4"));
++  await expect(sqr(page, "e4").locator('[data-piece="wP"]')).toBeVisible();
++  await expect(sqr(page, "e4")).toHaveClass(/last/);
++});
++
++test("promotion picker in a free game, and fen parameter", async ({ page }) => {
++  await page.goto("/?fen=8/P6k/8/8/8/8/8/4K3 w - - 0 1");
++  await move(page, "a7", "a8");
++  await page.getByTestId("promotion").locator('[data-piece="n"]').click();
++  await expect(sqr(page, "a8").locator('[data-piece="wN"]')).toBeVisible();
++});
++
++test("stalemate ends the game", async ({ page }) => {
++  await page.goto("/?fen=7k/8/5KQ1/8/8/8/8/8 w - - 0 1");
++  await move(page, "g6", "f7");
++  await expect(page.getByTestId("game-over")).toContainText("stalemate");
++});
++
++test("no horizontal scroll at phone width", async ({ page }) => {
++  await page.setViewportSize({ width: 390, height: 844 });
++  await page.goto("/");
++  const overflow = await page.evaluate(() => document.documentElement.scrollWidth > window.innerWidth);
++  expect(overflow).toBe(false);
++});
+diff --git a/tests/unit/engine.test.ts b/tests/unit/engine.test.ts
+new file mode 100644
+index 0000000..95dcb93
+--- /dev/null
++++ b/tests/unit/engine.test.ts
+@@ -0,0 +1,175 @@
++import { describe, expect, it } from "vitest";
++import {
++  START_FEN, applyMove, inCheck, legalMoves, outcome, parseFen, parseUci, perft, repetitionKey, sq, toFen, toUci,
++} from "../../src/engine.ts";
++
++const KIWIPETE = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1";
++const ucis = (fen: string) => legalMoves(parseFen(fen)).map(toUci);
++const play = (fen: string, ...moves: string[]) => {
++  let p = parseFen(fen);
++  for (const u of moves) {
++    const m = parseUci(p, u);
++    if (!m) throw new Error("illegal " + u);
++    p = applyMove(p, m);
++  }
++  return p;
++};
++
++describe("perft", () => {
++  it.each([[1, 20], [2, 400], [3, 8902], [4, 197281]])("start depth %i", (d, n) => {
++    expect(perft(parseFen(START_FEN), d)).toBe(n);
++  });
++  it.each([[1, 48], [2, 2039], [3, 97862]])("kiwipete depth %i", (d, n) => {
++    expect(perft(parseFen(KIWIPETE), d)).toBe(n);
++  });
++});
++
++describe("fen", () => {
++  it("round-trips", () => expect(toFen(parseFen(KIWIPETE))).toBe(KIWIPETE));
++});
++
++describe("legal moves only", () => {
++  it("pinned piece cannot leave the pin", () => {
++    expect(ucis("4k3/4r3/8/8/8/8/4R3/4K3 w - - 0 1").filter((m) => m.startsWith("e2"))).not.toContain("e2d2");
++  });
++  it("king cannot step into check", () => {
++    expect(ucis("4k3/8/8/8/8/8/r7/4K3 w - - 0 1")).not.toContain("e1e2");
++  });
++  it("must answer check", () => {
++    const moves = ucis("4k3/8/8/8/8/8/4r3/R3K3 w - - 0 1");
++    expect(moves.sort()).toEqual(["e1d1", "e1f1", "e1e2"].sort());
++  });
++});
++
++describe("castling", () => {
++  const base = "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1";
++  it("allowed on both sides", () => {
++    const m = ucis(base);
++    expect(m).toContain("e1g1");
++    expect(m).toContain("e1c1");
++  });
++  it("moves the rook too", () => {
++    const p = play(base, "e1g1");
++    expect(p.board[sq("f1")]).toBe("wR");
++    expect(p.board[sq("h1")]).toBeNull();
++    const q = play(base, "e1c1");
++    expect(q.board[sq("d1")]).toBe("wR");
++  });
++  it("not without rights", () => {
++    expect(ucis("r3k2r/8/8/8/8/8/8/R3K2R w Qkq - 0 1")).not.toContain("e1g1");
++    expect(ucis("r3k2r/8/8/8/8/8/8/R3K2R w Kkq - 0 1")).not.toContain("e1c1");
++  });
++  it("rights are lost once king or rook has moved", () => {
++    const p = play(base, "h1h2", "a8a7", "h2h1", "a7a8");
++    expect(ucis(toFen(p))).not.toContain("e1g1");
++    expect(ucis(toFen(p))).toContain("e1c1");
++  });
++  it("not with pieces between", () => {
++    const m = ucis("r3k2r/8/8/8/8/8/8/RN2KB1R w KQkq - 0 1");
++    expect(m).not.toContain("e1g1");
++    expect(m).not.toContain("e1c1");
++  });
++  it("not out of check", () => {
++    expect(ucis("r3k2r/8/8/8/8/8/4r3/R3K2R w KQkq - 0 1")).not.toContain("e1g1");
++  });
++  it("not through check", () => {
++    const m = ucis("r3k2r/8/8/8/8/8/5r2/R3K2R w KQkq - 0 1");
++    expect(m).not.toContain("e1g1");
++    expect(m).toContain("e1c1");
++  });
++  it("not into check", () => {
++    const m = ucis("r3k2r/8/8/8/8/8/6r1/R3K2R w KQkq - 0 1");
++    expect(m).not.toContain("e1g1");
++  });
++  it("queenside: b1 may be attacked, d1/c1 may not", () => {
++    expect(ucis("r3k2r/8/8/8/8/8/1r6/R3K2R w KQkq - 0 1")).toContain("e1c1");
++    expect(ucis("r3k2r/8/8/8/8/8/2r5/R3K2R w KQkq - 0 1")).not.toContain("e1c1");
++  });
++  it("black castles too", () => {
++    const m = ucis("r3k2r/8/8/8/8/8/8/R3K2R b KQkq - 0 1");
++    expect(m).toContain("e8g8");
++    expect(m).toContain("e8c8");
++  });
++});
++
++describe("en passant", () => {
++  it("available right after the double step, and removes the pawn", () => {
++    const p = play("4k3/3p4/8/4P3/8/8/8/4K3 b - - 0 1", "d7d5");
++    expect(ucis(toFen(p))).toContain("e5d6");
++    const q = play(toFen(p), "e5d6");
++    expect(q.board[sq("d5")]).toBeNull();
++    expect(q.board[sq("d6")]).toBe("wP");
++  });
++  it("not one move later", () => {
++    const p = play("4k3/3p4/8/4P3/8/8/8/4K3 b - - 0 1", "d7d5", "e1e2", "e8e7");
++    expect(ucis(toFen(p))).not.toContain("e5d6");
++  });
++  it("not after a single step", () => {
++    const p = play("4k3/8/3p4/4P3/8/8/8/4K3 b - - 0 1", "d6d5");
++    expect(ucis(toFen(p))).not.toContain("e5d6");
++  });
++  it("illegal if it exposes the king", () => {
++    // white king and rook on rank 5 with both pawns between would be exposed
++    const m = ucis("8/8/8/K2pP2r/8/8/8/4k3 w - d6 0 1");
++    expect(m).not.toContain("e5d6");
++  });
++});
++
++describe("promotion", () => {
++  it("offers all four pieces", () => {
++    const m = ucis("8/P6k/8/8/8/8/8/4K3 w - - 0 1").filter((x) => x.startsWith("a7a8"));
++    expect(m.sort()).toEqual(["a7a8b", "a7a8n", "a7a8q", "a7a8r"]);
++  });
++  it("replaces the pawn", () => {
++    const p = play("8/P6k/8/8/8/8/8/4K3 w - - 0 1", "a7a8n");
++    expect(p.board[sq("a8")]).toBe("wN");
++  });
++  it("works with capture, for black", () => {
++    expect(ucis("4k3/8/8/8/8/8/p7/1R2K3 b - - 0 1")).toContain("a2b1q");
++  });
++});
++
++describe("check", () => {
++  it("is detected", () => {
++    expect(inCheck(parseFen("4k3/8/8/8/8/8/4R3/4K3 b - - 0 1"))).toBe(true);
++    expect(inCheck(parseFen(START_FEN))).toBe(false);
++  });
++});
++
++describe("game end", () => {
++  it("checkmate (fool's mate)", () => {
++    const p = play(START_FEN, "f2f3", "e7e5", "g2g4", "d8h4");
++    const o = outcome(p, [repetitionKey(p)]);
++    expect(o).toEqual({ over: true, kind: "checkmate", winner: "b" });
++  });
++  it("stalemate", () => {
++    const p = parseFen("7k/5Q2/6K1/8/8/8/8/8 b - - 0 1");
++    expect(outcome(p, [])).toEqual({ over: true, kind: "stalemate" });
++  });
++  it("threefold repetition", () => {
++    let p = parseFen(START_FEN);
++    const keys = [repetitionKey(p)];
++    const cycle = ["g1f3", "g8f6", "f3g1", "f6g8"];
++    let last = outcome(p, keys);
++    for (let i = 0; i < 8; i++) {
++      expect(last.over).toBe(false);
++      p = play(toFen(p), cycle[i % 4]);
++      keys.push(repetitionKey(p));
++      last = outcome(p, keys);
++    }
++    expect(last).toEqual({ over: true, kind: "threefold" });
++  });
++  it("50-move rule", () => {
++    expect(outcome(parseFen("4k3/8/8/8/8/8/R7/4K3 w - - 99 80"), [])).toEqual({ over: false });
++    const p = play("4k3/8/8/8/8/8/R7/4K3 w - - 99 80", "a2a3");
++    expect(outcome(p, [])).toEqual({ over: true, kind: "fifty-move" });
++  });
++  it("50-move counter resets on a pawn move", () => {
++    const p = play("4k3/8/8/8/8/4P3/R7/4K3 w - - 99 80", "e3e4");
++    expect(p.halfmove).toBe(0);
++  });
++  it("checkmate beats the 50-move rule", () => {
++    const p = parseFen("R5k1/5ppp/8/8/8/8/8/6K1 b - - 100 80");
++    expect(outcome(p, []).over && (outcome(p, []) as { kind: string }).kind).toBe("checkmate");
++  });
++});

@@ -2,7 +2,7 @@
 # never see this file. Plan: ~/.claude/skills/workflow-compare/plans/chess-trainer.md
 
 .DEFAULT_GOAL := help
-.PHONY: help doctor setup puzzles launch checks shots round dry price clean
+.PHONY: help doctor setup puzzles launch checks shots round dry price report clean
 
 help: ## show this help
 	@awk 'BEGIN {FS = ":.*?## "; printf "\n\033[1mUsage:\033[0m make \033[36m<target>\033[0m\n\n\033[1mTargets:\033[0m\n"} \
@@ -35,6 +35,9 @@ dry: ## test the tooling on Haiku and a stub app (costs under one dollar)
 
 price: ## billed price of every build so far, with cross-checks
 	@python3 -I $(HOME)/.claude/skills/workflow-compare/scripts/blind.py price .workflow-compare/2026-11-07-chess-trainer
+
+report: ## gather builds, shots and numbers for the report artifact: make report [r=1]
+	@r=$(r) bash scripts/report.sh
 
 clean: ## remove build output and test results
 	@bash scripts/clean.sh

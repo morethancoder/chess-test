@@ -1,0 +1,2543 @@
+diff --git a/NOTES.md b/NOTES.md
+new file mode 100644
+index 0000000..8fbd87a
+--- /dev/null
++++ b/NOTES.md
+@@ -0,0 +1,54 @@
++# Notes
++
++How the brief was read where it left room, and other things worth knowing.
++
++## Layout of the code
++
++- `src/chess.ts` – rules engine (FEN, legal moves, SAN, perft, game status). No DOM.
++- `src/pieces.ts` – the original SVG piece set, drawn from paths and shapes in code.
++- `src/main.ts`, `src/style.css` – the page.
++- `scripts/perft.ts` – the `npm run perft` CLI (run by Node's built-in TypeScript support).
++- `tests/unit` – perft, one or more tests per rule (items 4–9), and a check that every puzzle's
++  solution is legal and ends in mate.
++- `tests/e2e` – Playwright tests (`npm run e2e`). Each test fails on any console or page error.
++- `tests/screenshots` – not part of `npm run e2e`; writes screenshots to `.playwright/`:
++  `npx playwright test --config tests/screenshots/playwright.config.ts`.
++
++## Readings of the brief
++
++- **Puzzle answers.** A move counts as correct if it equals the listed UCI move. On the last
++  move of a puzzle, any move that gives checkmate is also accepted, since another mate is just as
++  right. A wrong move is not played: its squares flash red, a message says to try again, and the
++  player can move again at once.
++- **Defender reply.** Played straight away (in the same step as the player's move) and animated
++  with a short delay, so the board never sits in a state where clicks are dropped.
++- **Puzzle board orientation.** The board is turned so the solving side is at the bottom
++  (puzzles 5 and 6 are Black to move).
++- **Solved state / game over.** Shown as a card over the board (`data-testid="puzzle-solved"` /
++  `"game-over"`) with "Next puzzle" / "New game" and a "View board" button. After "View board"
++  the same test id moves to the result line in the side panel, so exactly one element carries it.
++- **Next puzzle after 12** wraps round to puzzle 1.
++- **Draws.** Threefold repetition compares placement, side to move, castling rights and the
++  en passant square (only when an en passant capture is actually legal). The 50-move rule ends
++  the game when the half-move clock reaches 100, unless that move was checkmate.
++  Insufficient material is *not* treated as a draw: the brief doesn't ask for it, and ending a
++  game automatically on a rule it didn't list could break `?fen=` checks with bare kings.
++- **`?fen=`** starts a two-player game from that position (white at the bottom; "Flip board"
++  turns it). An invalid FEN shows a notice and starts the normal game instead (no console error).
++  `?puzzle=n` outside 1–12 opens puzzle 1 with a notice. The URL is kept in step with the mode
++  (`?puzzle=n` while in puzzles).
++- **Tap to move.** Tap a piece to show its targets (dots, rings for captures); tap a target to
++  move; tap the piece again, an empty square or press Escape to deselect.
++- **Drag.** Pointer events, so mouse, touch and pen all work. A drop on an illegal square
++  snaps back and keeps the piece selected.
++- **Promotion picker** buttons carry `data-piece="q|r|b|n"`. The piece drawings inside them do
++  not carry `data-piece`, so `[data-piece]` selectors on the board count only board pieces.
++- **Solved puzzles** are remembered in `localStorage` (a tick in the puzzle grid).
++
++## Known limits
++
++- `npm run perft` itself writes only the node count to stdout, but npm prints its own
++  `> chess-trainer@0.0.0 perft` banner before it. `npm run --silent perft -- ...` (or
++  `npm_config_loglevel=silent`) prints just the number. A project `.npmrc` with
++  `loglevel=silent` would hide the banner for everyone, but writing that file was blocked in
++  this environment, so it was left out.
+diff --git a/index.html b/index.html
+index 0bca02a..0ba18e4 100644
+--- a/index.html
++++ b/index.html
+@@ -3,7 +3,13 @@
+   <head>
+     <meta charset="UTF-8" />
+     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+-    <title>Chess trainer</title>
++    <meta name="color-scheme" content="light dark" />
++    <meta name="description" content="Chess trainer: pass-and-play games and mate puzzles." />
++    <link
++      rel="icon"
++      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='2' y='2' width='28' height='28' rx='7' fill='%232f6f5e'/%3E%3Crect x='8' y='8' width='8' height='8' fill='%23f3efe6'/%3E%3Crect x='16' y='16' width='8' height='8' fill='%23f3efe6'/%3E%3C/svg%3E"
++    />
++    <title>Chess Trainer</title>
+   </head>
+   <body>
+     <div id="app"></div>
+diff --git a/package.json b/package.json
+index ce53873..e24f34f 100644
+--- a/package.json
++++ b/package.json
+@@ -8,7 +8,8 @@
+     "build": "tsc && vite build",
+     "preview": "vite preview",
+     "test": "vitest run --passWithNoTests",
+-    "e2e": "playwright test --pass-with-no-tests"
++    "e2e": "playwright test --pass-with-no-tests",
++    "perft": "node scripts/perft.ts"
+   },
+   "devDependencies": {
+     "@playwright/test": "1.65.0",
+diff --git a/scripts/perft.ts b/scripts/perft.ts
+new file mode 100644
+index 0000000..067e031
+--- /dev/null
++++ b/scripts/perft.ts
+@@ -0,0 +1,15 @@
++// CLI: npm run perft -- "<fen>" <depth>  -> prints only the node count.
++import { Position, perft } from "../src/chess.ts";
++
++const [fen, depthArg] = process.argv.slice(2);
++const depth = Number(depthArg);
++if (!fen || !Number.isInteger(depth) || depth < 0) {
++  process.stderr.write('usage: npm run perft -- "<fen>" <depth>\n');
++  process.exit(2);
++}
++try {
++  process.stdout.write(perft(Position.fromFen(fen), depth) + "\n");
++} catch (e) {
++  process.stderr.write(`${(e as Error).message}\n`);
++  process.exit(1);
++}
+diff --git a/src/chess.ts b/src/chess.ts
+new file mode 100644
+index 0000000..feb493f
+--- /dev/null
++++ b/src/chess.ts
+@@ -0,0 +1,507 @@
++// Chess rules engine: board representation, FEN, legal move generation,
++// SAN, perft and game-ending detection. No DOM code here.
++
++export type Color = "w" | "b";
++export type PieceType = "p" | "n" | "b" | "r" | "q" | "k";
++export interface Piece {
++  readonly color: Color;
++  readonly type: PieceType;
++}
++export type MoveFlag = "normal" | "double" | "ep" | "castleK" | "castleQ";
++export interface Move {
++  from: number;
++  to: number;
++  color: Color;
++  piece: PieceType;
++  captured?: PieceType;
++  promotion?: PieceType;
++  flag: MoveFlag;
++}
++interface Undo {
++  castling: number;
++  ep: number;
++  halfmove: number;
++  fullmove: number;
++  captured: Piece | null;
++}
++
++export const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
++
++const FILES = "abcdefgh";
++export const squareName = (sq: number): string => FILES[sq & 7] + ((sq >> 3) + 1);
++export const fileOf = (sq: number): number => sq & 7;
++export const rankOf = (sq: number): number => sq >> 3;
++export function parseSquare(name: string): number {
++  if (!/^[a-h][1-8]$/.test(name)) return -1;
++  return (Number(name[1]) - 1) * 8 + FILES.indexOf(name[0]);
++}
++export const other = (c: Color): Color => (c === "w" ? "b" : "w");
++
++// Shared immutable piece objects, so moves never allocate pieces.
++const PIECES: Record<Color, Record<PieceType, Piece>> = {
++  w: { p: { color: "w", type: "p" }, n: { color: "w", type: "n" }, b: { color: "w", type: "b" }, r: { color: "w", type: "r" }, q: { color: "w", type: "q" }, k: { color: "w", type: "k" } },
++  b: { p: { color: "b", type: "p" }, n: { color: "b", type: "n" }, b: { color: "b", type: "b" }, r: { color: "b", type: "r" }, q: { color: "b", type: "q" }, k: { color: "b", type: "k" } },
++};
++export const pieceOf = (color: Color, type: PieceType): Piece => PIECES[color][type];
++
++// Castling rights bits.
++const WK = 1, WQ = 2, BK = 4, BQ = 8;
++// Rights that survive a move touching a square (a rook or king leaving or being captured).
++const CASTLE_MASK = new Array<number>(64).fill(15);
++CASTLE_MASK[0] = 15 & ~WQ;
++CASTLE_MASK[7] = 15 & ~WK;
++CASTLE_MASK[4] = 15 & ~(WK | WQ);
++CASTLE_MASK[56] = 15 & ~BQ;
++CASTLE_MASK[63] = 15 & ~BK;
++CASTLE_MASK[60] = 15 & ~(BK | BQ);
++
++// Precomputed attack tables.
++function jumps(deltas: number[][]): number[][] {
++  const out: number[][] = [];
++  for (let sq = 0; sq < 64; sq++) {
++    const f = sq & 7, r = sq >> 3, list: number[] = [];
++    for (const [df, dr] of deltas) {
++      const nf = f + df, nr = r + dr;
++      if (nf >= 0 && nf < 8 && nr >= 0 && nr < 8) list.push(nr * 8 + nf);
++    }
++    out.push(list);
++  }
++  return out;
++}
++function rays(deltas: number[][]): number[][][] {
++  const out: number[][][] = [];
++  for (let sq = 0; sq < 64; sq++) {
++    const f = sq & 7, r = sq >> 3, dirs: number[][] = [];
++    for (const [df, dr] of deltas) {
++      const ray: number[] = [];
++      let nf = f + df, nr = r + dr;
++      while (nf >= 0 && nf < 8 && nr >= 0 && nr < 8) {
++        ray.push(nr * 8 + nf);
++        nf += df;
++        nr += dr;
++      }
++      dirs.push(ray);
++    }
++    out.push(dirs);
++  }
++  return out;
++}
++const KNIGHT = jumps([[1, 2], [2, 1], [2, -1], [1, -2], [-1, -2], [-2, -1], [-2, 1], [-1, 2]]);
++const KING = jumps([[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]]);
++const ROOK_RAYS = rays([[1, 0], [-1, 0], [0, 1], [0, -1]]);
++const BISHOP_RAYS = rays([[1, 1], [1, -1], [-1, 1], [-1, -1]]);
++// PAWN_FROM[color][sq]: squares a pawn of `color` would have to stand on to attack sq.
++const PAWN_FROM: Record<Color, number[][]> = { w: jumps([[-1, -1], [1, -1]]), b: jumps([[-1, 1], [1, 1]]) };
++const PAWN_CAPS: Record<Color, number[][]> = { w: jumps([[-1, 1], [1, 1]]), b: jumps([[-1, -1], [1, -1]]) };
++
++const PROMOS: PieceType[] = ["q", "r", "b", "n"];
++
++export class Position {
++  board: (Piece | null)[] = new Array(64).fill(null);
++  turn: Color = "w";
++  castling = 0;
++  ep = -1;
++  halfmove = 0;
++  fullmove = 1;
++  kings: Record<Color, number> = { w: -1, b: -1 };
++
++  static fromFen(fen: string): Position {
++    const parts = fen.trim().split(/\s+/);
++    if (parts.length < 4 || parts.length > 6) throw new Error("FEN needs 4 to 6 fields");
++    const [placement, turn, castling, ep, half = "0", full = "1"] = parts;
++    const pos = new Position();
++    const rows = placement.split("/");
++    if (rows.length !== 8) throw new Error("FEN board needs 8 ranks");
++    rows.forEach((row, i) => {
++      const rank = 7 - i;
++      let file = 0;
++      for (const ch of row) {
++        if (/[1-8]/.test(ch)) {
++          file += Number(ch);
++        } else {
++          const type = ch.toLowerCase();
++          if (!"pnbrqk".includes(type)) throw new Error(`Bad piece '${ch}' in FEN`);
++          if (file > 7) throw new Error("FEN rank too long");
++          const color: Color = ch === type ? "b" : "w";
++          pos.board[rank * 8 + file] = pieceOf(color, type as PieceType);
++          if (type === "k") {
++            if (pos.kings[color] !== -1) throw new Error("More than one king of a colour");
++            pos.kings[color] = rank * 8 + file;
++          }
++          if (type === "p" && (rank === 0 || rank === 7)) throw new Error("Pawn on back rank");
++          file++;
++        }
++      }
++      if (file !== 8) throw new Error("FEN rank must have 8 squares");
++    });
++    if (pos.kings.w === -1 || pos.kings.b === -1) throw new Error("Each side needs a king");
++    if (turn !== "w" && turn !== "b") throw new Error("Side to move must be w or b");
++    pos.turn = turn;
++    if (!/^(-|K?Q?k?q?)$/.test(castling) || castling === "") throw new Error("Bad castling field");
++    const has = (sq: number, c: Color, t: PieceType) => pos.board[sq] === pieceOf(c, t);
++    if (castling.includes("K") && has(4, "w", "k") && has(7, "w", "r")) pos.castling |= WK;
++    if (castling.includes("Q") && has(4, "w", "k") && has(0, "w", "r")) pos.castling |= WQ;
++    if (castling.includes("k") && has(60, "b", "k") && has(63, "b", "r")) pos.castling |= BK;
++    if (castling.includes("q") && has(60, "b", "k") && has(56, "b", "r")) pos.castling |= BQ;
++    if (ep !== "-") {
++      const sq = parseSquare(ep);
++      if (sq < 0 || (rankOf(sq) !== (turn === "w" ? 5 : 2))) throw new Error("Bad en passant square");
++      pos.ep = sq;
++    }
++    if (!/^\d+$/.test(half) || !/^\d+$/.test(full)) throw new Error("Bad move counters");
++    pos.halfmove = Number(half);
++    pos.fullmove = Math.max(1, Number(full));
++    if (pos.isAttacked(pos.kings[other(pos.turn)], pos.turn)) throw new Error("Side not to move is in check");
++    return pos;
++  }
++
++  fen(): string {
++    const rows: string[] = [];
++    for (let r = 7; r >= 0; r--) {
++      let row = "", empty = 0;
++      for (let f = 0; f < 8; f++) {
++        const p = this.board[r * 8 + f];
++        if (!p) {
++          empty++;
++          continue;
++        }
++        if (empty) row += empty;
++        empty = 0;
++        row += p.color === "w" ? p.type.toUpperCase() : p.type;
++      }
++      rows.push(empty ? row + empty : row);
++    }
++    let c = "";
++    if (this.castling & WK) c += "K";
++    if (this.castling & WQ) c += "Q";
++    if (this.castling & BK) c += "k";
++    if (this.castling & BQ) c += "q";
++    const ep = this.ep >= 0 ? squareName(this.ep) : "-";
++    return `${rows.join("/")} ${this.turn} ${c || "-"} ${ep} ${this.halfmove} ${this.fullmove}`;
++  }
++
++  /** Is `sq` attacked by any piece of colour `by`? */
++  isAttacked(sq: number, by: Color): boolean {
++    const b = this.board;
++    for (const s of PAWN_FROM[by][sq]) if (b[s] === PIECES[by].p) return true;
++    for (const s of KNIGHT[sq]) if (b[s] === PIECES[by].n) return true;
++    for (const s of KING[sq]) if (b[s] === PIECES[by].k) return true;
++    const q = PIECES[by].q;
++    for (const ray of ROOK_RAYS[sq]) {
++      for (const s of ray) {
++        const p = b[s];
++        if (p) {
++          if (p === q || p === PIECES[by].r) return true;
++          break;
++        }
++      }
++    }
++    for (const ray of BISHOP_RAYS[sq]) {
++      for (const s of ray) {
++        const p = b[s];
++        if (p) {
++          if (p === q || p === PIECES[by].b) return true;
++          break;
++        }
++      }
++    }
++    return false;
++  }
++
++  inCheck(color: Color = this.turn): boolean {
++    return this.isAttacked(this.kings[color], other(color));
++  }
++
++  pseudoMoves(): Move[] {
++    const moves: Move[] = [];
++    const b = this.board, us = this.turn, them = other(us);
++    for (let from = 0; from < 64; from++) {
++      const p = b[from];
++      if (!p || p.color !== us) continue;
++      const add = (to: number, flag: MoveFlag = "normal") => {
++        const cap = b[to];
++        moves.push({ from, to, color: us, piece: p.type, captured: cap ? cap.type : undefined, flag });
++      };
++      switch (p.type) {
++        case "p": {
++          const dir = us === "w" ? 8 : -8;
++          const startRank = us === "w" ? 1 : 6;
++          const promoRank = us === "w" ? 7 : 0;
++          const pushPawn = (to: number, cap: PieceType | undefined, flag: MoveFlag) => {
++            if (rankOf(to) === promoRank) {
++              for (const promotion of PROMOS) moves.push({ from, to, color: us, piece: "p", captured: cap, promotion, flag });
++            } else {
++              moves.push({ from, to, color: us, piece: "p", captured: cap, flag });
++            }
++          };
++          const one = from + dir;
++          if (!b[one]) {
++            pushPawn(one, undefined, "normal");
++            const two = one + dir;
++            if (rankOf(from) === startRank && !b[two]) pushPawn(two, undefined, "double");
++          }
++          for (const to of PAWN_CAPS[us][from]) {
++            const t = b[to];
++            if (t && t.color === them) pushPawn(to, t.type, "normal");
++            else if (to === this.ep) pushPawn(to, "p", "ep");
++          }
++          break;
++        }
++        case "n":
++          for (const to of KNIGHT[from]) if (b[to]?.color !== us) add(to);
++          break;
++        case "k":
++          for (const to of KING[from]) if (b[to]?.color !== us) add(to);
++          this.castleMoves(from, add);
++          break;
++        default: {
++          const dirs = p.type === "r" ? ROOK_RAYS[from] : p.type === "b" ? BISHOP_RAYS[from] : [...ROOK_RAYS[from], ...BISHOP_RAYS[from]];
++          for (const ray of dirs) {
++            for (const to of ray) {
++              const t = b[to];
++              if (t) {
++                if (t.color !== us) add(to);
++                break;
++              }
++              add(to);
++            }
++          }
++        }
++      }
++    }
++    return moves;
++  }
++
++  private castleMoves(from: number, add: (to: number, flag: MoveFlag) => void) {
++    const us = this.turn, them = other(us), b = this.board;
++    const home = us === "w" ? 4 : 60;
++    if (from !== home) return;
++    const kSide = us === "w" ? WK : BK, qSide = us === "w" ? WQ : BQ;
++    if (!(this.castling & (kSide | qSide)) || this.isAttacked(home, them)) return;
++    if (this.castling & kSide && !b[home + 1] && !b[home + 2] && b[home + 3] === PIECES[us].r &&
++      !this.isAttacked(home + 1, them) && !this.isAttacked(home + 2, them)) add(home + 2, "castleK");
++    if (this.castling & qSide && !b[home - 1] && !b[home - 2] && !b[home - 3] && b[home - 4] === PIECES[us].r &&
++      !this.isAttacked(home - 1, them) && !this.isAttacked(home - 2, them)) add(home - 2, "castleQ");
++  }
++
++  make(m: Move): Undo {
++    const b = this.board;
++    const undo: Undo = { castling: this.castling, ep: this.ep, halfmove: this.halfmove, fullmove: this.fullmove, captured: b[m.to] };
++    const moving = b[m.from]!;
++    if (m.flag === "ep") {
++      const capSq = m.to + (m.color === "w" ? -8 : 8);
++      undo.captured = b[capSq];
++      b[capSq] = null;
++    }
++    b[m.to] = m.promotion ? PIECES[m.color][m.promotion] : moving;
++    b[m.from] = null;
++    if (m.piece === "k") this.kings[m.color] = m.to;
++    if (m.flag === "castleK") {
++      b[m.to - 1] = b[m.to + 1];
++      b[m.to + 1] = null;
++    } else if (m.flag === "castleQ") {
++      b[m.to + 1] = b[m.to - 2];
++      b[m.to - 2] = null;
++    }
++    this.castling &= CASTLE_MASK[m.from] & CASTLE_MASK[m.to];
++    this.ep = m.flag === "double" ? (m.from + m.to) >> 1 : -1;
++    this.halfmove = m.piece === "p" || undo.captured ? 0 : this.halfmove + 1;
++    if (m.color === "b") this.fullmove++;
++    this.turn = other(this.turn);
++    return undo;
++  }
++
++  unmake(m: Move, u: Undo) {
++    const b = this.board;
++    this.turn = m.color;
++    this.castling = u.castling;
++    this.ep = u.ep;
++    this.halfmove = u.halfmove;
++    this.fullmove = u.fullmove;
++    b[m.from] = PIECES[m.color][m.piece];
++    if (m.piece === "k") this.kings[m.color] = m.from;
++    if (m.flag === "ep") {
++      b[m.to] = null;
++      b[m.to + (m.color === "w" ? -8 : 8)] = u.captured;
++    } else {
++      b[m.to] = u.captured;
++    }
++    if (m.flag === "castleK") {
++      b[m.to + 1] = b[m.to - 1];
++      b[m.to - 1] = null;
++    } else if (m.flag === "castleQ") {
++      b[m.to - 2] = b[m.to + 1];
++      b[m.to + 1] = null;
++    }
++  }
++
++  legalMoves(): Move[] {
++    const us = this.turn, them = other(us);
++    return this.pseudoMoves().filter((m) => {
++      const u = this.make(m);
++      const ok = !this.isAttacked(this.kings[us], them);
++      this.unmake(m, u);
++      return ok;
++    });
++  }
++
++  /** Key for repetition: placement, side, castling and an en passant square only if a capture there is legal. */
++  repetitionKey(): string {
++    const [placement, turn, castling] = this.fen().split(" ");
++    let ep = "-";
++    if (this.ep >= 0 && this.legalMoves().some((m) => m.flag === "ep")) ep = squareName(this.ep);
++    return `${placement} ${turn} ${castling} ${ep}`;
++  }
++}
++
++export function perft(pos: Position, depth: number): number {
++  if (depth === 0) return 1;
++  const moves = pos.legalMoves();
++  if (depth === 1) return moves.length;
++  let n = 0;
++  for (const m of moves) {
++    const u = pos.make(m);
++    n += perft(pos, depth - 1);
++    pos.unmake(m, u);
++  }
++  return n;
++}
++
++export const moveToUci = (m: Move): string => squareName(m.from) + squareName(m.to) + (m.promotion ?? "");
++
++/** SAN for a legal move in `pos` (pos is restored afterwards). */
++export function toSan(pos: Position, m: Move, legal: Move[] = pos.legalMoves()): string {
++  let san: string;
++  if (m.flag === "castleK") san = "O-O";
++  else if (m.flag === "castleQ") san = "O-O-O";
++  else {
++    const capture = m.captured !== undefined;
++    if (m.piece === "p") {
++      san = (capture ? FILES[fileOf(m.from)] + "x" : "") + squareName(m.to);
++      if (m.promotion) san += "=" + m.promotion.toUpperCase();
++    } else {
++      const rivals = legal.filter((o) => o.piece === m.piece && o.to === m.to && o.from !== m.from);
++      let dis = "";
++      if (rivals.length) {
++        const sameFile = rivals.some((o) => fileOf(o.from) === fileOf(m.from));
++        const sameRank = rivals.some((o) => rankOf(o.from) === rankOf(m.from));
++        if (!sameFile) dis = FILES[fileOf(m.from)];
++        else if (!sameRank) dis = String(rankOf(m.from) + 1);
++        else dis = squareName(m.from);
++      }
++      san = m.piece.toUpperCase() + dis + (capture ? "x" : "") + squareName(m.to);
++    }
++  }
++  const u = pos.make(m);
++  if (pos.inCheck()) san += pos.legalMoves().length === 0 ? "#" : "+";
++  pos.unmake(m, u);
++  return san;
++}
++
++export type DrawReason = "stalemate" | "threefold" | "fifty-move";
++export interface GameStatus {
++  over: boolean;
++  check: boolean;
++  reason?: "checkmate" | DrawReason;
++  winner?: Color;
++}
++interface HistoryEntry {
++  move: Move;
++  undo: Undo;
++  san: string;
++}
++
++/** A game: a position plus history, with repetition and move-rule tracking. */
++export class Game {
++  pos: Position;
++  history: HistoryEntry[] = [];
++  readonly startFen: string;
++  private keys: string[];
++  private legalCache: Move[] | null = null;
++
++  constructor(fen: string = START_FEN) {
++    this.pos = Position.fromFen(fen);
++    this.startFen = this.pos.fen();
++    this.keys = [this.pos.repetitionKey()];
++  }
++
++  get turn(): Color {
++    return this.pos.turn;
++  }
++
++  moves(): Move[] {
++    return (this.legalCache ??= this.pos.legalMoves());
++  }
++
++  movesFrom(sq: number): Move[] {
++    return this.moves().filter((m) => m.from === sq);
++  }
++
++  findMove(from: number, to: number, promotion?: PieceType): Move | undefined {
++    return this.moves().find((m) => m.from === from && m.to === to && (m.promotion ?? undefined) === (promotion ?? undefined));
++  }
++
++  findUci(uci: string): Move | undefined {
++    const from = parseSquare(uci.slice(0, 2)), to = parseSquare(uci.slice(2, 4));
++    const promo = uci[4] as PieceType | undefined;
++    return this.findMove(from, to, promo);
++  }
++
++  /** Plays a legal move (throws if it isn't one). Returns its SAN. */
++  play(m: Move): string {
++    const legal = this.moves();
++    const real = legal.find((o) => o.from === m.from && o.to === m.to && o.promotion === m.promotion);
++    if (!real) throw new Error(`Illegal move ${moveToUci(m)}`);
++    if (this.status().over) throw new Error("Game is over");
++    const san = toSan(this.pos, real, legal);
++    const undo = this.pos.make(real);
++    this.history.push({ move: real, undo, san });
++    this.legalCache = null;
++    this.keys.push(this.pos.repetitionKey());
++    return san;
++  }
++
++  undo(): Move | undefined {
++    const last = this.history.pop();
++    if (!last) return undefined;
++    this.pos.unmake(last.move, last.undo);
++    this.keys.pop();
++    this.legalCache = null;
++    return last.move;
++  }
++
++  lastMove(): Move | undefined {
++    return this.history[this.history.length - 1]?.move;
++  }
++
++  repetitions(): number {
++    const now = this.keys[this.keys.length - 1];
++    return this.keys.filter((k) => k === now).length;
++  }
++
++  status(): GameStatus {
++    const check = this.pos.inCheck();
++    if (this.moves().length === 0) {
++      return check ? { over: true, check, reason: "checkmate", winner: other(this.turn) } : { over: true, check, reason: "stalemate" };
++    }
++    if (this.repetitions() >= 3) return { over: true, check, reason: "threefold" };
++    if (this.pos.halfmove >= 100) return { over: true, check, reason: "fifty-move" };
++    return { over: false, check };
++  }
++}
++
++export function describeResult(s: GameStatus): { title: string; detail: string } {
++  const side = (c?: Color) => (c === "w" ? "White" : "Black");
++  switch (s.reason) {
++    case "checkmate":
++      return { title: "Checkmate", detail: `${side(s.winner)} wins` };
++    case "stalemate":
++      return { title: "Stalemate", detail: "Draw" };
++    case "threefold":
++      return { title: "Draw", detail: "Threefold repetition" };
++    case "fifty-move":
++      return { title: "Draw", detail: "Fifty-move rule" };
++    default:
++      return { title: "", detail: "" };
++  }
++}
+diff --git a/src/main.ts b/src/main.ts
+index 67aeb67..21cae03 100644
+--- a/src/main.ts
++++ b/src/main.ts
+@@ -1,2 +1,645 @@
+-// Entry point. The app is built here.
+-export {};
++// Entry point: the board UI, pass-and-play and puzzle mode.
++import "./style.css";
++import {
++  Game,
++  START_FEN,
++  describeResult,
++  moveToUci,
++  parseSquare,
++  squareName,
++  type Color,
++  type Move,
++  type PieceType,
++} from "./chess.ts";
++import { PIECE_NAMES, pieceSvg } from "./pieces.ts";
++
++interface Puzzle {
++  id: number;
++  type: string;
++  fen: string;
++  solution: string[];
++}
++type Mode = "play" | "puzzle";
++type Feedback = { kind: "info" | "wrong" | "good"; text: string } | null;
++
++// ---------- state ----------
++let mode: Mode = "play";
++let playGame = new Game();
++let flipped = false;
++let puzzles: Puzzle[] = [];
++let puzzleError = "";
++let notice = "";
++
++const pz = {
++  index: 0,
++  game: null as Game | null,
++  step: 0,
++  solved: false,
++  feedback: null as Feedback,
++  hint: false,
++};
++const solvedIds = new Set<number>(readSolved());
++
++let selected: number | null = null;
++let pendingPromotion: { from: number; to: number } | null = null;
++let resultDismissed = false;
++let wrongSquares: number[] = [];
++let wrongTimer = 0;
++
++const game = (): Game => (mode === "puzzle" && pz.game ? pz.game : playGame);
++// The side the puzzle solver plays: whoever moves first in the puzzle FEN.
++const puzzleSide = (): Color => (pz.game ? (pz.game.startFen.split(" ")[1] as Color) : "w");
++const orientation = (): Color => (mode === "puzzle" && pz.game ? puzzleSide() : flipped ? "b" : "w");
++
++// ---------- DOM skeleton ----------
++const app = document.querySelector<HTMLDivElement>("#app")!;
++app.innerHTML = `
++  <header class="top">
++    <div class="brand">
++      <svg class="brand-mark" viewBox="0 0 32 32" aria-hidden="true">
++        <rect x="2" y="2" width="28" height="28" rx="7" class="bm-bg"/>
++        <rect x="8" y="8" width="8" height="8" class="bm-sq"/><rect x="16" y="16" width="8" height="8" class="bm-sq"/>
++      </svg>
++      <h1>Chess Trainer</h1>
++    </div>
++    <nav class="tabs" aria-label="Mode">
++      <button type="button" class="tab" data-mode="play">Play</button>
++      <button type="button" class="tab" data-mode="puzzle">Puzzles</button>
++    </nav>
++  </header>
++  <main class="layout">
++    <section class="board-area" aria-label="Board">
++      <div class="board-frame">
++        <div class="board" id="board"></div>
++        <div class="overlay" id="overlay" hidden></div>
++      </div>
++    </section>
++    <aside class="panel" id="panel" aria-live="polite"></aside>
++  </main>
++`;
++const boardEl = document.getElementById("board")!;
++const overlayEl = document.getElementById("overlay")!;
++const panelEl = document.getElementById("panel")!;
++const squareEls = new Map<number, HTMLElement>();
++let builtFor: Color | null = null;
++
++function buildBoard(side: Color) {
++  boardEl.replaceChildren();
++  squareEls.clear();
++  for (let row = 0; row < 8; row++) {
++    for (let col = 0; col < 8; col++) {
++      const rank = side === "w" ? 7 - row : row;
++      const file = side === "w" ? col : 7 - col;
++      const sq = rank * 8 + file;
++      const el = document.createElement("div");
++      el.className = `square ${(rank + file) % 2 === 0 ? "dark" : "light"}`;
++      el.dataset.square = squareName(sq);
++      if (row === 7) el.insertAdjacentHTML("beforeend", `<span class="coord coord-file" aria-hidden="true">${"abcdefgh"[file]}</span>`);
++      if (col === 0) el.insertAdjacentHTML("beforeend", `<span class="coord coord-rank" aria-hidden="true">${rank + 1}</span>`);
++      boardEl.appendChild(el);
++      squareEls.set(sq, el);
++    }
++  }
++  builtFor = side;
++}
++
++// ---------- rendering ----------
++interface Anim {
++  move: Move;
++  delay: number;
++}
++
++function render(anims: Anim[] = []) {
++  const g = game();
++  const side = orientation();
++  if (builtFor !== side) buildBoard(side);
++  const status = g.status();
++  const last = g.lastMove();
++  const targets = selected !== null ? g.movesFrom(selected) : [];
++  const hintFrom = mode === "puzzle" && pz.hint && pz.game && !pz.solved ? pz.game.findUci(puzzles[pz.index].solution[pz.step])?.from : undefined;
++  for (const [sq, el] of squareEls) {
++    const p = g.pos.board[sq];
++    const want = p ? p.color + p.type.toUpperCase() : null;
++    let pieceEl = el.querySelector<SVGSVGElement>("svg.piece");
++    if ((pieceEl?.getAttribute("data-piece") ?? null) !== want) {
++      pieceEl?.remove();
++      pieceEl = null;
++      if (p) {
++        pieceEl = pieceSvg(p.color, p.type, { "data-piece": want! });
++        el.appendChild(pieceEl);
++      }
++    }
++    pieceEl?.classList.remove("dragging");
++    const target = targets.find((m) => m.to === sq);
++    el.classList.toggle("selected", sq === selected);
++    el.classList.toggle("last-move", !!last && (last.from === sq || last.to === sq));
++    el.classList.toggle("target", !!target && !target.captured);
++    el.classList.toggle("capture", !!target && !!target.captured);
++    el.classList.toggle("check", status.check && p?.type === "k" && p.color === g.turn);
++    el.classList.toggle("wrong", wrongSquares.includes(sq));
++    el.classList.toggle("hint", sq === hintFrom);
++    el.setAttribute("aria-label", `${squareName(sq)}${p ? `, ${p.color === "w" ? "white" : "black"} ${PIECE_NAMES[p.type]}` : ""}`);
++    if (status.check && p?.type === "k" && p.color === g.turn) el.dataset.check = "true";
++    else delete el.dataset.check;
++  }
++  boardEl.classList.toggle("locked", !canInteract());
++  renderTabs();
++  renderOverlay();
++  renderPanel();
++  runAnimations(anims);
++}
++
++function runAnimations(anims: Anim[]) {
++  if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
++  for (const { move, delay } of anims) {
++    const fromEl = squareEls.get(move.from), toEl = squareEls.get(move.to);
++    const piece = toEl?.querySelector<SVGSVGElement>("svg.piece");
++    if (!fromEl || !toEl || !piece) continue;
++    const a = fromEl.getBoundingClientRect(), b = toEl.getBoundingClientRect();
++    piece.animate(
++      [{ transform: `translate(${a.left - b.left}px, ${a.top - b.top}px)` }, { transform: "translate(0, 0)" }],
++      { duration: 180, delay, easing: "cubic-bezier(.2,.7,.3,1)", fill: "backwards" },
++    );
++  }
++}
++
++function renderTabs() {
++  for (const t of document.querySelectorAll<HTMLButtonElement>(".tab")) {
++    const on = t.dataset.mode === mode;
++    t.classList.toggle("active", on);
++    t.setAttribute("aria-pressed", String(on));
++  }
++}
++
++const sideName = (c: Color) => (c === "w" ? "White" : "Black");
++const esc = (s: string) => s.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c]!);
++
++function renderOverlay() {
++  const g = game();
++  const status = g.status();
++  overlayEl.replaceChildren();
++  if (pendingPromotion) {
++    const color = g.turn;
++    const box = document.createElement("div");
++    box.className = "card promotion";
++    box.dataset.testid = "promotion";
++    box.setAttribute("role", "dialog");
++    box.setAttribute("aria-label", "Choose a piece to promote to");
++    box.innerHTML = `<p class="card-title">Promote to</p><div class="promo-row"></div><button type="button" class="link" data-action="cancel-promo">Cancel</button>`;
++    const row = box.querySelector(".promo-row")!;
++    for (const t of ["q", "r", "b", "n"] as PieceType[]) {
++      const btn = document.createElement("button");
++      btn.type = "button";
++      btn.className = "promo-btn";
++      btn.dataset.piece = t;
++      btn.setAttribute("aria-label", PIECE_NAMES[t]);
++      btn.title = PIECE_NAMES[t];
++      btn.appendChild(pieceSvg(color, t));
++      row.appendChild(btn);
++    }
++    overlayEl.appendChild(box);
++    overlayEl.hidden = false;
++    return;
++  }
++  if (mode === "puzzle" && pz.solved && !resultDismissed) {
++    const p = puzzles[pz.index];
++    overlayEl.innerHTML = `
++      <div class="card result solved" data-testid="puzzle-solved" role="dialog" aria-label="Puzzle solved">
++        <div class="badge good" aria-hidden="true">✓</div>
++        <p class="card-title">Solved!</p>
++        <p class="card-sub">Puzzle ${p.id} · ${p.type === "mate-in-2" ? "Mate in 2" : "Mate in 1"}</p>
++        <div class="card-actions">
++          <button type="button" class="btn primary" data-action="next-puzzle">Next puzzle</button>
++          <button type="button" class="btn" data-action="dismiss">View board</button>
++        </div>
++      </div>`;
++    overlayEl.hidden = false;
++    return;
++  }
++  if (mode === "play" && status.over && !resultDismissed) {
++    const r = describeResult(status);
++    const score = status.winner === "w" ? "1-0" : status.winner === "b" ? "0-1" : "½-½";
++    overlayEl.innerHTML = `
++      <div class="card result" data-testid="game-over" role="dialog" aria-label="Game over">
++        <p class="card-title">${r.title}</p>
++        <p class="card-sub">${r.detail}</p>
++        <p class="score">${score}</p>
++        <div class="card-actions">
++          <button type="button" class="btn primary" data-action="new">New game</button>
++          <button type="button" class="btn" data-action="dismiss">View board</button>
++        </div>
++      </div>`;
++    overlayEl.hidden = false;
++    return;
++  }
++  overlayEl.hidden = true;
++}
++
++function moveListHtml(g: Game): string {
++  if (!g.history.length) return `<p class="muted small">No moves yet.</p>`;
++  const [, turn, , , , full] = g.startFen.split(" ");
++  let num = Number(full);
++  let html = "";
++  let i = 0;
++  if (turn === "b") {
++    html += `<li><span class="num">${num}.</span><span class="ply">…</span><span class="ply">${esc(g.history[0].san)}</span></li>`;
++    i = 1;
++    num++;
++  }
++  for (; i < g.history.length; i += 2, num++) {
++    const a = g.history[i].san, b = g.history[i + 1]?.san ?? "";
++    html += `<li><span class="num">${num}.</span><span class="ply">${esc(a)}</span><span class="ply">${esc(b)}</span></li>`;
++  }
++  return `<ol class="moves">${html}</ol>`;
++}
++
++function renderPanel() {
++  const noticeHtml = notice ? `<p class="notice" role="status">${esc(notice)}</p>` : "";
++  if (mode === "play") {
++    const g = playGame;
++    const s = g.status();
++    let statusHtml: string;
++    if (s.over) {
++      const r = describeResult(s);
++      const testid = resultDismissed ? ` data-testid="game-over"` : "";
++      statusHtml = `<div class="status over"${testid}><span class="dot ${s.winner ?? "draw"}"></span><strong>${r.title}</strong> · ${r.detail}</div>`;
++    } else {
++      statusHtml = `<div class="status"><span class="dot ${g.turn}"></span><span><strong>${sideName(g.turn)}</strong> to move</span>${s.check ? ` <span class="pill danger">Check</span>` : ""}</div>`;
++    }
++    panelEl.innerHTML = `
++      ${noticeHtml}
++      ${statusHtml}
++      <div class="controls">
++        <button type="button" class="btn" data-action="new">New game</button>
++        <button type="button" class="btn" data-action="undo" ${g.history.length ? "" : "disabled"}>Undo</button>
++        <button type="button" class="btn" data-action="flip">Flip board</button>
++      </div>
++      <h2 class="section">Moves</h2>
++      <div class="moves-wrap">${moveListHtml(g)}</div>
++      <p class="muted small help">Tap a piece then a highlighted square, or drag it. Pass the device to your opponent after each move.</p>`;
++    const wrap = panelEl.querySelector(".moves-wrap");
++    if (wrap) wrap.scrollTop = wrap.scrollHeight;
++    return;
++  }
++  // puzzle mode
++  if (!puzzles.length) {
++    panelEl.innerHTML = `${noticeHtml}<p class="muted">${puzzleError ? esc(puzzleError) : "Loading puzzles…"}</p>`;
++    return;
++  }
++  const p = puzzles[pz.index];
++  const side = sideName(puzzleSide());
++  const moves = p.type === "mate-in-2" ? 2 : 1;
++  const fb = pz.feedback;
++  const solvedBanner = pz.solved && resultDismissed
++    ? `<div class="feedback good" data-testid="puzzle-solved">Solved! <button type="button" class="link" data-action="next-puzzle">Next puzzle →</button></div>`
++    : "";
++  const grid = puzzles
++    .map((q, i) => `<button type="button" class="pz ${i === pz.index ? "current" : ""} ${solvedIds.has(q.id) ? "done" : ""}" data-action="goto" data-index="${i}" aria-label="Puzzle ${q.id}${solvedIds.has(q.id) ? " (solved)" : ""}">${q.id}</button>`)
++    .join("");
++  panelEl.innerHTML = `
++    ${noticeHtml}
++    <div class="pz-head">
++      <h2 class="pz-title">Puzzle ${p.id} <span class="muted">/ ${puzzles.length}</span></h2>
++      <span class="pill">${moves === 1 ? "Mate in 1" : "Mate in 2"}</span>
++    </div>
++    <div class="status"><span class="dot ${puzzleSide()}"></span>${side} to move and mate in ${moves}.</div>
++    ${solvedBanner || (fb ? `<div class="feedback ${fb.kind}">${esc(fb.text)}</div>` : `<div class="feedback info">Find the checkmate.</div>`)}
++    <div class="controls pz-controls">
++      <button type="button" class="btn" data-action="hint" ${pz.solved ? "disabled" : ""}>Hint</button>
++      <button type="button" class="btn" data-action="restart">Restart</button>
++      <button type="button" class="btn" data-action="prev-puzzle" aria-label="Previous puzzle">← Prev</button>
++      <button type="button" class="btn" data-action="next-puzzle" aria-label="Next puzzle">Next →</button>
++    </div>
++    <h2 class="section">All puzzles</h2>
++    <div class="pz-grid">${grid}</div>`;
++}
++
++// ---------- game flow ----------
++function canInteract(): boolean {
++  if (pendingPromotion) return false;
++  if (mode === "puzzle") return !!pz.game && !pz.solved;
++  return !playGame.status().over;
++}
++
++function select(sq: number | null) {
++  selected = sq;
++  render();
++}
++
++function attemptMove(from: number, to: number, dragged: boolean) {
++  const g = game();
++  const options = g.movesFrom(from).filter((m) => m.to === to);
++  if (!options.length) return;
++  if (options.some((m) => m.promotion)) {
++    pendingPromotion = { from, to };
++    render();
++    return;
++  }
++  commit(options[0], dragged);
++}
++
++function commit(m: Move, dragged: boolean) {
++  selected = null;
++  wrongSquares = [];
++  clearTimeout(wrongTimer);
++  if (mode === "play") {
++    playGame.play(m);
++    resultDismissed = false;
++    render(dragged ? [] : [{ move: m, delay: 0 }]);
++  } else {
++    puzzleMove(m, dragged);
++  }
++}
++
++function puzzleMove(m: Move, dragged: boolean) {
++  const g = pz.game!;
++  const sol = puzzles[pz.index].solution;
++  const isLast = pz.step === sol.length - 1;
++  g.play(m);
++  const ok = moveToUci(m) === sol[pz.step] || (isLast && g.status().reason === "checkmate");
++  if (!ok) {
++    g.undo();
++    pz.feedback = { kind: "wrong", text: "Not the right move. Try again." };
++    flashWrong([m.from, m.to]);
++    return;
++  }
++  pz.step++;
++  pz.hint = false;
++  const anims: Anim[] = dragged ? [] : [{ move: m, delay: 0 }];
++  if (pz.step >= sol.length) {
++    pz.solved = true;
++    resultDismissed = false;
++    pz.feedback = { kind: "good", text: "Checkmate. Solved!" };
++    solvedIds.add(puzzles[pz.index].id);
++    saveSolved();
++  } else {
++    // Defender's reply plays automatically.
++    const reply = g.findUci(sol[pz.step])!;
++    g.play(reply);
++    pz.step++;
++    pz.feedback = { kind: "good", text: `Good move. ${sideName(reply.color)} replied ${g.history[g.history.length - 1].san}. Now finish it.` };
++    anims.push({ move: reply, delay: dragged ? 120 : 260 });
++  }
++  render(anims);
++}
++
++function flashWrong(squares: number[]) {
++  wrongSquares = squares;
++  clearTimeout(wrongTimer);
++  wrongTimer = window.setTimeout(() => {
++    wrongSquares = [];
++    render();
++  }, 900);
++  render();
++}
++
++function choosePromotion(t: PieceType) {
++  if (!pendingPromotion) return;
++  const { from, to } = pendingPromotion;
++  pendingPromotion = null;
++  const m = game().findMove(from, to, t);
++  if (m) commit(m, false);
++  else render();
++}
++
++function newGame(fen?: string) {
++  playGame = new Game(fen);
++  selected = null;
++  pendingPromotion = null;
++  resultDismissed = false;
++  notice = "";
++  setUrl(fen ? { fen } : {});
++  render();
++}
++
++function openPuzzle(index: number) {
++  if (!puzzles.length) return;
++  pz.index = ((index % puzzles.length) + puzzles.length) % puzzles.length;
++  pz.game = new Game(puzzles[pz.index].fen);
++  pz.step = 0;
++  pz.solved = false;
++  pz.feedback = null;
++  pz.hint = false;
++  selected = null;
++  pendingPromotion = null;
++  resultDismissed = false;
++  wrongSquares = [];
++  mode = "puzzle";
++  setUrl({ puzzle: String(pz.index + 1) });
++  render();
++}
++
++function setMode(m: Mode) {
++  if (m === mode) return;
++  notice = "";
++  selected = null;
++  pendingPromotion = null;
++  resultDismissed = false;
++  if (m === "puzzle") {
++    mode = "puzzle";
++    if (pz.game) {
++      setUrl({ puzzle: String(pz.index + 1) });
++      render();
++    } else openPuzzle(0);
++  } else {
++    mode = "play";
++    setUrl(playGame.startFen === START_FEN ? {} : { fen: playGame.startFen });
++    render();
++  }
++}
++
++function setUrl(params: Record<string, string>) {
++  const q = new URLSearchParams(params).toString();
++  history.replaceState(null, "", location.pathname + (q ? `?${q}` : ""));
++}
++
++function readSolved(): number[] {
++  try {
++    const v = JSON.parse(localStorage.getItem("solved-puzzles") ?? "[]");
++    return Array.isArray(v) ? v.filter((x) => typeof x === "number") : [];
++  } catch {
++    return [];
++  }
++}
++function saveSolved() {
++  try {
++    localStorage.setItem("solved-puzzles", JSON.stringify([...solvedIds]));
++  } catch {
++    /* storage unavailable; progress just isn't kept */
++  }
++}
++
++// ---------- input: tap and drag (pointer events cover mouse, touch and pen) ----------
++interface DragState {
++  from: number;
++  pointerId: number;
++  x0: number;
++  y0: number;
++  started: boolean;
++  wasSelected: boolean;
++  ghost?: SVGSVGElement;
++  over?: HTMLElement | null;
++}
++let drag: DragState | null = null;
++
++const squareAt = (x: number, y: number): HTMLElement | null =>
++  document.elementFromPoint(x, y)?.closest<HTMLElement>("#board [data-square]") ?? null;
++
++boardEl.addEventListener("pointerdown", (e) => {
++  if (e.pointerType === "mouse" && e.button !== 0) return;
++  const sqEl = (e.target as Element).closest<HTMLElement>("[data-square]");
++  if (!sqEl) return;
++  e.preventDefault();
++  if (!canInteract()) return;
++  const sq = parseSquare(sqEl.dataset.square!);
++  const g = game();
++  if (selected !== null && selected !== sq && g.movesFrom(selected).some((m) => m.to === sq)) {
++    attemptMove(selected, sq, false);
++    return;
++  }
++  const p = g.pos.board[sq];
++  if (p && p.color === g.turn) {
++    const wasSelected = selected === sq;
++    if (!wasSelected) select(sq);
++    drag = { from: sq, pointerId: e.pointerId, x0: e.clientX, y0: e.clientY, started: false, wasSelected };
++    return;
++  }
++  if (selected !== null) select(null);
++});
++
++window.addEventListener("pointermove", (e) => {
++  if (!drag || e.pointerId !== drag.pointerId) return;
++  if (!drag.started) {
++    if (Math.hypot(e.clientX - drag.x0, e.clientY - drag.y0) < 5) return;
++    const src = squareEls.get(drag.from)?.querySelector<SVGSVGElement>("svg.piece");
++    if (!src) return;
++    drag.started = true;
++    const size = squareEls.get(drag.from)!.getBoundingClientRect().width;
++    const ghost = src.cloneNode(true) as SVGSVGElement;
++    ghost.removeAttribute("data-piece");
++    ghost.classList.add("ghost");
++    ghost.style.width = ghost.style.height = `${size * 1.1}px`;
++    document.body.appendChild(ghost);
++    drag.ghost = ghost;
++    src.classList.add("dragging");
++    document.body.classList.add("is-dragging");
++  }
++  const ghost = drag.ghost!;
++  const half = parseFloat(ghost.style.width) / 2;
++  ghost.style.transform = `translate(${e.clientX - half}px, ${e.clientY - half}px)`;
++  const over = squareAt(e.clientX, e.clientY);
++  if (over !== drag.over) {
++    drag.over?.classList.remove("drag-over");
++    over?.classList.add("drag-over");
++    drag.over = over;
++  }
++});
++
++function endDrag(e: PointerEvent, cancelled: boolean) {
++  if (!drag || e.pointerId !== drag.pointerId) return;
++  const d = drag;
++  drag = null;
++  d.over?.classList.remove("drag-over");
++  d.ghost?.remove();
++  document.body.classList.remove("is-dragging");
++  if (d.started) {
++    const target = cancelled ? null : squareAt(e.clientX, e.clientY);
++    const to = target ? parseSquare(target.dataset.square!) : -1;
++    if (to >= 0 && to !== d.from && game().movesFrom(d.from).some((m) => m.to === to)) attemptMove(d.from, to, true);
++    else render();
++  } else if (d.wasSelected) {
++    select(null); // tapping the selected piece again deselects it
++  }
++}
++window.addEventListener("pointerup", (e) => endDrag(e, false));
++window.addEventListener("pointercancel", (e) => endDrag(e, true));
++boardEl.addEventListener("contextmenu", (e) => e.preventDefault());
++
++// ---------- buttons ----------
++document.addEventListener("click", (e) => {
++  const t = e.target as Element;
++  const tab = t.closest<HTMLButtonElement>(".tab");
++  if (tab) return setMode(tab.dataset.mode as Mode);
++  const promo = t.closest<HTMLButtonElement>(".promo-btn");
++  if (promo) return choosePromotion(promo.dataset.piece as PieceType);
++  const btn = t.closest<HTMLButtonElement>("[data-action]");
++  if (!btn) return;
++  switch (btn.dataset.action) {
++    case "new":
++      return newGame();
++    case "undo":
++      playGame.undo();
++      selected = null;
++      resultDismissed = false;
++      return render();
++    case "flip":
++      flipped = !flipped;
++      return render();
++    case "dismiss":
++      resultDismissed = true;
++      return render();
++    case "cancel-promo":
++      pendingPromotion = null;
++      return render();
++    case "next-puzzle":
++      return openPuzzle(pz.index + 1);
++    case "prev-puzzle":
++      return openPuzzle(pz.index - 1);
++    case "goto":
++      return openPuzzle(Number(btn.dataset.index));
++    case "restart":
++      return openPuzzle(pz.index);
++    case "hint":
++      pz.hint = true;
++      pz.feedback = { kind: "info", text: "The highlighted piece makes the next move." };
++      return render();
++  }
++});
++
++document.addEventListener("keydown", (e) => {
++  if (e.key !== "Escape") return;
++  if (pendingPromotion) pendingPromotion = null;
++  else if (selected !== null) selected = null;
++  else return;
++  render();
++});
++
++// ---------- start-up ----------
++async function loadPuzzles() {
++  try {
++    const res = await fetch(`${import.meta.env.BASE_URL}puzzles.json`);
++    if (!res.ok) throw new Error(String(res.status));
++    puzzles = (await res.json()) as Puzzle[];
++  } catch {
++    puzzleError = "Puzzles could not be loaded.";
++  }
++}
++
++async function start() {
++  const params = new URLSearchParams(location.search);
++  const fen = params.get("fen");
++  const puzzleParam = params.get("puzzle");
++  await loadPuzzles();
++  if (puzzleParam !== null && puzzles.length) {
++    const n = Number(puzzleParam);
++    if (Number.isInteger(n) && n >= 1 && n <= puzzles.length) {
++      openPuzzle(n - 1);
++    } else {
++      openPuzzle(0);
++      notice = `There is no puzzle ${puzzleParam}; showing puzzle 1.`;
++      render();
++    }
++    return;
++  }
++  if (fen) {
++    try {
++      playGame = new Game(fen);
++    } catch (err) {
++      notice = `Couldn't use that FEN (${(err as Error).message}). Starting a normal game.`;
++      setUrl({});
++    }
++  }
++  render();
++}
++
++void start();
+diff --git a/src/pieces.ts b/src/pieces.ts
+new file mode 100644
+index 0000000..7e692d2
+--- /dev/null
++++ b/src/pieces.ts
+@@ -0,0 +1,83 @@
++// Original piece set, drawn as SVG in a 100x100 box. Each piece is a few
++// filled shapes ("body") plus thin detail lines ("line") drawn on top.
++import type { Color, PieceType } from "./chess.ts";
++
++const NS = "http://www.w3.org/2000/svg";
++
++interface Shape {
++  tag: "path" | "circle" | "rect";
++  attrs: Record<string, string | number>;
++  detail?: boolean; // drawn as an inner line, not a filled body
++}
++const path = (d: string, detail = false): Shape => ({ tag: "path", attrs: { d }, detail });
++const circle = (cx: number, cy: number, r: number): Shape => ({ tag: "circle", attrs: { cx, cy, r } });
++const rect = (x: number, y: number, width: number, height: number, rx = 3): Shape => ({ tag: "rect", attrs: { x, y, width, height, rx } });
++
++const BASE = rect(22, 80, 56, 10, 4);
++
++const SHAPES: Record<PieceType, Shape[]> = {
++  p: [
++    BASE,
++    path("M36 80 C36 66 42 58 45 50 L55 50 C58 58 64 66 64 80 Z"),
++    rect(38, 44, 24, 7, 3.5),
++    circle(50, 32, 12),
++  ],
++  r: [
++    BASE,
++    path("M31 80 L34 47 L66 47 L69 80 Z"),
++    rect(27, 41, 46, 8, 2.5),
++    path("M29 41 L29 19 L39 19 L39 27 L45.5 27 L45.5 19 L54.5 19 L54.5 27 L61 27 L61 19 L71 19 L71 41 Z"),
++    path("M38 60 L62 60", true),
++  ],
++  n: [
++    BASE,
++    path("M33 80 C33 68 39 61 48 54 C42 57 35 61 29 61 C22 61 19 55 22 50 C27 42 33 35 39 29 L41 15 L49 23 C66 24 77 42 74 80 Z"),
++    path("M57 30 C65 39 69 55 68 72", true),
++    { tag: "circle", attrs: { cx: 39, cy: 38, r: 2.8 }, detail: true },
++  ],
++  b: [
++    BASE,
++    path("M37 80 C39 72 43 68 44 63 L56 63 C57 68 61 72 63 80 Z"),
++    rect(35, 57, 30, 7, 3.5),
++    path("M50 20 C64 31 67 45 60 57 L40 57 C33 45 36 31 50 20 Z"),
++    circle(50, 15, 5),
++    path("M55 31 L46 42", true),
++  ],
++  q: [
++    BASE,
++    path("M29 80 L32 68 L68 68 L71 80 Z"),
++    path("M32 68 L21 33 L33 49 L36 25 L44 45 L50 21 L56 45 L64 25 L67 49 L79 33 L68 68 Z"),
++    circle(21, 31, 4.5),
++    circle(36, 23, 4.5),
++    circle(50, 18, 4.5),
++    circle(64, 23, 4.5),
++    circle(79, 31, 4.5),
++    path("M35 60 L65 60", true),
++  ],
++  k: [
++    BASE,
++    path("M29 80 L32 70 L68 70 L71 80 Z"),
++    path("M32 70 C24 56 22 42 33 38 C42 35 48 42 50 48 C52 42 58 35 67 38 C78 42 76 56 68 70 Z"),
++    rect(46.5, 12, 7, 26, 2),
++    rect(40, 17.5, 20, 7, 2),
++    path("M35 62 L65 62", true),
++  ],
++};
++
++/** Builds the SVG for a piece. `attrs` go on the root element. */
++export function pieceSvg(color: Color, type: PieceType, attrs: Record<string, string> = {}): SVGSVGElement {
++  const svg = document.createElementNS(NS, "svg");
++  svg.setAttribute("viewBox", "0 0 100 100");
++  svg.setAttribute("class", `piece piece-${color}`);
++  svg.setAttribute("aria-hidden", "true");
++  for (const [k, v] of Object.entries(attrs)) svg.setAttribute(k, v);
++  for (const s of SHAPES[type]) {
++    const el = document.createElementNS(NS, s.tag);
++    for (const [k, v] of Object.entries(s.attrs)) el.setAttribute(k, String(v));
++    el.setAttribute("class", s.detail ? (s.tag === "circle" ? "eye" : "line") : "body");
++    svg.appendChild(el);
++  }
++  return svg;
++}
++
++export const PIECE_NAMES: Record<PieceType, string> = { p: "pawn", n: "knight", b: "bishop", r: "rook", q: "queen", k: "king" };
+diff --git a/src/style.css b/src/style.css
+new file mode 100644
+index 0000000..46c5411
+--- /dev/null
++++ b/src/style.css
+@@ -0,0 +1,648 @@
++:root {
++  color-scheme: light dark;
++  --bg: #f3efe6;
++  --surface: #fffdf8;
++  --surface-2: #f0ebe0;
++  --border: #e0d8c8;
++  --text: #24211c;
++  --muted: #776f62;
++  --accent: #2f6f5e;
++  --accent-text: #ffffff;
++  --danger: #c2412d;
++  --good: #2f7d4f;
++  --sq-light: #ece3cf;
++  --sq-dark: #84a07c;
++  --coord-on-light: #6f8a68;
++  --coord-on-dark: #f1ead9;
++  --hl-last: rgba(236, 190, 60, 0.45);
++  --hl-selected: rgba(236, 170, 30, 0.7);
++  --target: rgba(30, 40, 30, 0.28);
++  --w-fill: #fbf8f1;
++  --w-stroke: #2b2722;
++  --b-fill: #2e2b28;
++  --b-stroke: #141210;
++  --b-line: #cfc6b6;
++  --shadow: 0 1px 2px rgba(40, 30, 10, 0.08), 0 8px 24px rgba(40, 30, 10, 0.1);
++  --radius: 14px;
++}
++
++@media (prefers-color-scheme: dark) {
++  :root {
++    --bg: #14161a;
++    --surface: #1d2026;
++    --surface-2: #262a31;
++    --border: #30353e;
++    --text: #e9e6df;
++    --muted: #9aa0a9;
++    --accent: #5fb39a;
++    --accent-text: #0d1a16;
++    --danger: #ef6a55;
++    --good: #5cc488;
++    --sq-light: #a9b4c2;
++    --sq-dark: #5a6b80;
++    --coord-on-light: #4f5f73;
++    --coord-on-dark: #d0d8e2;
++    --hl-last: rgba(240, 200, 80, 0.42);
++    --hl-selected: rgba(245, 185, 50, 0.7);
++    --target: rgba(10, 15, 25, 0.38);
++    --w-fill: #f4f1ea;
++    --w-stroke: #1b1d21;
++    --b-fill: #23262c;
++    --b-stroke: #0b0c0e;
++    --b-line: #aeb6c2;
++    --shadow: 0 1px 2px rgba(0, 0, 0, 0.3), 0 10px 30px rgba(0, 0, 0, 0.35);
++  }
++}
++
++* {
++  box-sizing: border-box;
++}
++html,
++body {
++  margin: 0;
++  background: var(--bg);
++  color: var(--text);
++  font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
++  -webkit-font-smoothing: antialiased;
++}
++body {
++  min-height: 100vh;
++  overflow-x: hidden;
++}
++button {
++  font: inherit;
++  color: inherit;
++}
++
++/* ---------- header ---------- */
++.top {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 12px;
++  max-width: 1040px;
++  margin: 0 auto;
++  padding: 14px 16px;
++}
++.brand {
++  display: flex;
++  align-items: center;
++  gap: 10px;
++}
++.brand h1 {
++  font-size: 18px;
++  font-weight: 700;
++  letter-spacing: -0.01em;
++  margin: 0;
++}
++.brand-mark {
++  width: 28px;
++  height: 28px;
++}
++.bm-bg {
++  fill: var(--accent);
++}
++.bm-sq {
++  fill: var(--bg);
++}
++.tabs {
++  display: flex;
++  background: var(--surface-2);
++  border: 1px solid var(--border);
++  border-radius: 999px;
++  padding: 3px;
++}
++.tab {
++  border: 0;
++  background: transparent;
++  padding: 6px 16px;
++  border-radius: 999px;
++  cursor: pointer;
++  font-weight: 600;
++  color: var(--muted);
++}
++.tab.active {
++  background: var(--surface);
++  color: var(--text);
++  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.12);
++}
++.tab:focus-visible,
++.btn:focus-visible,
++.pz:focus-visible,
++.promo-btn:focus-visible,
++.link:focus-visible {
++  outline: 2px solid var(--accent);
++  outline-offset: 2px;
++}
++
++/* ---------- layout ---------- */
++.layout {
++  --board: min(calc(100vw - 24px), 560px);
++  display: flex;
++  flex-direction: column;
++  align-items: center;
++  gap: 16px;
++  padding: 0 12px 32px;
++  max-width: 1040px;
++  margin: 0 auto;
++}
++.panel {
++  width: var(--board);
++  background: var(--surface);
++  border: 1px solid var(--border);
++  border-radius: var(--radius);
++  box-shadow: var(--shadow);
++  padding: 16px;
++  display: flex;
++  flex-direction: column;
++  gap: 12px;
++  min-width: 0;
++}
++@media (min-width: 900px) {
++  .layout {
++    --board: min(calc(100vh - 110px), 640px);
++    flex-direction: row;
++    align-items: flex-start;
++    justify-content: center;
++    gap: 28px;
++    padding-top: 8px;
++  }
++  .panel {
++    width: 340px;
++    flex: none;
++    max-height: var(--board);
++  }
++}
++
++/* ---------- board ---------- */
++.board-area {
++  flex: none;
++}
++.board-frame {
++  position: relative;
++  width: var(--board);
++  height: var(--board);
++  border-radius: 10px;
++  overflow: hidden;
++  box-shadow: var(--shadow);
++}
++.board {
++  display: grid;
++  grid-template-columns: repeat(8, 1fr);
++  grid-template-rows: repeat(8, 1fr);
++  width: 100%;
++  height: 100%;
++  touch-action: none;
++  user-select: none;
++  -webkit-user-select: none;
++  -webkit-touch-callout: none;
++}
++.square {
++  position: relative;
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  cursor: pointer;
++}
++.square.light {
++  background: var(--sq-light);
++}
++.square.dark {
++  background: var(--sq-dark);
++}
++.square::before {
++  content: "";
++  position: absolute;
++  inset: 0;
++  pointer-events: none;
++}
++.square.last-move::before {
++  background: var(--hl-last);
++}
++.square.selected::before {
++  background: var(--hl-selected);
++}
++.square.hint::before {
++  box-shadow: inset 0 0 0 4px var(--accent);
++  animation: pulse 1.2s ease-in-out infinite;
++}
++.square.wrong::before {
++  background: rgba(220, 60, 40, 0.55);
++}
++.square.drag-over::before {
++  box-shadow: inset 0 0 0 4px rgba(255, 255, 255, 0.75);
++}
++.square.check {
++  background-image: radial-gradient(circle, rgba(235, 40, 30, 0.95) 0%, rgba(235, 40, 30, 0.6) 35%, rgba(235, 40, 30, 0) 72%);
++}
++.square.target::after {
++  content: "";
++  position: absolute;
++  width: 30%;
++  height: 30%;
++  border-radius: 50%;
++  background: var(--target);
++  pointer-events: none;
++}
++.square.capture::after {
++  content: "";
++  position: absolute;
++  inset: 4%;
++  border-radius: 50%;
++  border: max(4px, calc(var(--board) / 110)) solid var(--target);
++  pointer-events: none;
++}
++.coord {
++  position: absolute;
++  font-size: max(10.5px, calc(var(--board) / 42));
++  font-weight: 750;
++  line-height: 1;
++  pointer-events: none;
++}
++.coord-file {
++  right: 4%;
++  bottom: 4%;
++}
++.coord-rank {
++  left: 4%;
++  top: 4%;
++}
++.square.light .coord {
++  color: var(--coord-on-light);
++}
++.square.dark .coord {
++  color: var(--coord-on-dark);
++}
++.board.locked .square {
++  cursor: default;
++}
++
++/* ---------- pieces ---------- */
++.piece {
++  position: relative;
++  width: 88%;
++  height: 88%;
++  z-index: 1;
++  filter: drop-shadow(0 2px 1.5px rgba(0, 0, 0, 0.28));
++}
++.piece .body {
++  stroke-width: 3.2;
++  stroke-linejoin: round;
++}
++.piece .line {
++  fill: none;
++  stroke-width: 3;
++  stroke-linecap: round;
++}
++.piece-w .body {
++  fill: var(--w-fill);
++  stroke: var(--w-stroke);
++}
++.piece-w .line {
++  stroke: var(--w-stroke);
++}
++.piece-w .eye {
++  fill: var(--w-stroke);
++}
++.piece-b .body {
++  fill: var(--b-fill);
++  stroke: var(--b-stroke);
++}
++.piece-b .line {
++  stroke: var(--b-line);
++}
++.piece-b .eye {
++  fill: var(--b-line);
++}
++.piece.dragging {
++  opacity: 0.3;
++}
++.piece.ghost {
++  position: fixed;
++  left: 0;
++  top: 0;
++  z-index: 100;
++  pointer-events: none;
++  filter: drop-shadow(0 8px 8px rgba(0, 0, 0, 0.35));
++}
++body.is-dragging,
++body.is-dragging * {
++  cursor: grabbing !important;
++}
++
++/* ---------- overlay cards ---------- */
++.overlay {
++  position: absolute;
++  inset: 0;
++  z-index: 5;
++  display: flex;
++  align-items: center;
++  justify-content: center;
++  background: rgba(10, 12, 10, 0.32);
++  backdrop-filter: blur(1.5px);
++  padding: 16px;
++}
++.overlay[hidden] {
++  display: none;
++}
++.card {
++  background: var(--surface);
++  color: var(--text);
++  border: 1px solid var(--border);
++  border-radius: var(--radius);
++  box-shadow: var(--shadow);
++  padding: 20px 22px;
++  text-align: center;
++  max-width: 100%;
++  animation: pop 0.18s ease-out;
++}
++.card-title {
++  margin: 0;
++  font-size: 22px;
++  font-weight: 750;
++  letter-spacing: -0.01em;
++}
++.card-sub {
++  margin: 4px 0 0;
++  color: var(--muted);
++  font-size: 16px;
++}
++.score {
++  margin: 6px 0 0;
++  font-weight: 700;
++  font-variant-numeric: tabular-nums;
++}
++.card-actions {
++  display: flex;
++  gap: 8px;
++  justify-content: center;
++  margin-top: 16px;
++  flex-wrap: wrap;
++}
++.badge {
++  width: 44px;
++  height: 44px;
++  margin: 0 auto 10px;
++  border-radius: 50%;
++  display: grid;
++  place-items: center;
++  font-size: 24px;
++  font-weight: 800;
++}
++.badge.good {
++  background: var(--good);
++  color: #fff;
++}
++.promo-row {
++  display: flex;
++  gap: 8px;
++  margin: 12px 0 8px;
++}
++.promo-btn {
++  width: clamp(56px, calc(var(--board) / 6.5), 84px);
++  aspect-ratio: 1;
++  border-radius: 10px;
++  border: 1px solid var(--border);
++  background: var(--surface-2);
++  cursor: pointer;
++  display: grid;
++  place-items: center;
++  padding: 4px;
++}
++.promo-btn:hover {
++  border-color: var(--accent);
++}
++.promo-btn .piece {
++  width: 100%;
++  height: 100%;
++}
++
++/* ---------- panel ---------- */
++.btn {
++  border: 1px solid var(--border);
++  background: var(--surface-2);
++  padding: 8px 14px;
++  border-radius: 10px;
++  cursor: pointer;
++  font-weight: 600;
++  min-height: 40px;
++}
++.btn:hover:not(:disabled) {
++  border-color: var(--muted);
++}
++.btn:disabled {
++  opacity: 0.45;
++  cursor: default;
++}
++.btn.primary {
++  background: var(--accent);
++  color: var(--accent-text);
++  border-color: var(--accent);
++}
++.link {
++  border: 0;
++  background: none;
++  color: var(--accent);
++  font-weight: 600;
++  cursor: pointer;
++  padding: 2px 4px;
++}
++.controls {
++  display: flex;
++  flex-wrap: wrap;
++  gap: 8px;
++}
++.controls .btn {
++  flex: 1 1 auto;
++}
++.pz-controls {
++  display: grid;
++  grid-template-columns: repeat(4, 1fr);
++}
++.pz-controls .btn {
++  padding-inline: 6px;
++}
++@media (min-width: 900px) {
++  .pz-controls {
++    grid-template-columns: repeat(2, 1fr);
++  }
++}
++.status {
++  display: flex;
++  align-items: center;
++  flex-wrap: wrap;
++  gap: 6px;
++  font-size: 16px;
++}
++.dot {
++  width: 14px;
++  height: 14px;
++  border-radius: 50%;
++  border: 2px solid var(--w-stroke);
++  flex: none;
++}
++.dot.w {
++  background: var(--w-fill);
++}
++.dot.b {
++  background: var(--b-fill);
++  border-color: var(--b-line);
++}
++.dot.draw {
++  background: linear-gradient(90deg, var(--w-fill) 50%, var(--b-fill) 50%);
++}
++.pill {
++  display: inline-block;
++  font-size: 12px;
++  font-weight: 700;
++  padding: 2px 9px;
++  border-radius: 999px;
++  background: var(--surface-2);
++  border: 1px solid var(--border);
++  color: var(--muted);
++}
++.pill.danger {
++  background: var(--danger);
++  border-color: var(--danger);
++  color: #fff;
++}
++.section {
++  font-size: 12px;
++  text-transform: uppercase;
++  letter-spacing: 0.08em;
++  color: var(--muted);
++  margin: 4px 0 -4px;
++}
++.moves-wrap {
++  overflow-y: auto;
++  max-height: 220px;
++  min-height: 40px;
++  flex: 1 1 auto;
++}
++@media (min-width: 900px) {
++  .moves-wrap {
++    max-height: none;
++  }
++}
++.moves {
++  list-style: none;
++  margin: 0;
++  padding: 0;
++  font-variant-numeric: tabular-nums;
++}
++.moves li {
++  display: grid;
++  grid-template-columns: 2.6em 1fr 1fr;
++  padding: 3px 6px;
++  border-radius: 6px;
++}
++.moves li:nth-child(odd) {
++  background: var(--surface-2);
++}
++.num {
++  color: var(--muted);
++}
++.ply {
++  font-weight: 600;
++}
++.muted {
++  color: var(--muted);
++}
++.small {
++  font-size: 13px;
++}
++.help {
++  margin: 0;
++}
++.notice {
++  margin: 0;
++  padding: 8px 12px;
++  border-radius: 10px;
++  background: var(--surface-2);
++  border: 1px solid var(--border);
++  font-size: 14px;
++}
++.feedback {
++  padding: 10px 12px;
++  border-radius: 10px;
++  font-weight: 600;
++  background: var(--surface-2);
++  border: 1px solid var(--border);
++}
++.feedback.wrong {
++  color: var(--danger);
++  border-color: color-mix(in srgb, var(--danger) 45%, var(--border));
++  animation: shake 0.3s ease;
++}
++.feedback.good {
++  color: var(--good);
++  border-color: color-mix(in srgb, var(--good) 45%, var(--border));
++}
++.pz-head {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 8px;
++}
++.pz-title {
++  margin: 0;
++  font-size: 20px;
++}
++.pz-grid {
++  display: grid;
++  grid-template-columns: repeat(6, 1fr);
++  gap: 6px;
++}
++.pz {
++  aspect-ratio: 1;
++  min-height: 40px;
++  border-radius: 10px;
++  border: 1px solid var(--border);
++  background: var(--surface-2);
++  cursor: pointer;
++  font-weight: 700;
++  position: relative;
++}
++.pz.done {
++  background: color-mix(in srgb, var(--good) 18%, var(--surface-2));
++  border-color: color-mix(in srgb, var(--good) 50%, var(--border));
++}
++.pz.done::after {
++  content: "✓";
++  position: absolute;
++  top: 2px;
++  right: 5px;
++  font-size: 10px;
++  color: var(--good);
++}
++.pz.current {
++  outline: 2px solid var(--accent);
++  outline-offset: 1px;
++}
++
++@keyframes pop {
++  from {
++    transform: scale(0.94);
++    opacity: 0;
++  }
++}
++@keyframes shake {
++  25% {
++    transform: translateX(-4px);
++  }
++  75% {
++    transform: translateX(4px);
++  }
++}
++@keyframes pulse {
++  50% {
++    opacity: 0.4;
++  }
++}
++@media (prefers-reduced-motion: reduce) {
++  *,
++  *::before,
++  *::after {
++    animation: none !important;
++  }
++}
+diff --git a/tests/e2e/app.spec.ts b/tests/e2e/app.spec.ts
+new file mode 100644
+index 0000000..48255ea
+--- /dev/null
++++ b/tests/e2e/app.spec.ts
+@@ -0,0 +1,168 @@
++import { expect, test, type Page } from "@playwright/test";
++
++const sq = (page: Page, name: string) => page.locator(`[data-square="${name}"]`);
++async function move(page: Page, uci: string) {
++  await sq(page, uci.slice(0, 2)).click();
++  await sq(page, uci.slice(2, 4)).click();
++}
++async function drag(page: Page, from: string, to: string) {
++  const a = (await sq(page, from).boundingBox())!, b = (await sq(page, to).boundingBox())!;
++  await page.mouse.move(a.x + a.width / 2, a.y + a.height / 2);
++  await page.mouse.down();
++  await page.mouse.move(a.x + a.width / 2 + 10, a.y + a.height / 2 + 10, { steps: 3 });
++  await page.mouse.move(b.x + b.width / 2, b.y + b.height / 2, { steps: 8 });
++  await page.mouse.up();
++}
++
++// Every test fails on any console error or page error.
++let errors: string[] = [];
++test.beforeEach(({ page }) => {
++  errors = [];
++  page.on("console", (m) => {
++    if (m.type() === "error") errors.push(m.text());
++  });
++  page.on("pageerror", (e) => errors.push(e.message));
++});
++test.afterEach(() => expect(errors).toEqual([]));
++
++test("start position has 64 squares and 32 pieces", async ({ page }) => {
++  await page.goto("/");
++  await expect(page.locator("[data-square]")).toHaveCount(64);
++  await expect(page.locator("#board [data-piece]")).toHaveCount(32);
++  await expect(sq(page, "e1").locator('[data-piece="wK"]')).toHaveCount(1);
++  await expect(sq(page, "d8").locator('[data-piece="bQ"]')).toHaveCount(1);
++});
++
++test("plays a game to checkmate", async ({ page }) => {
++  await page.goto("/");
++  await move(page, "e2e4");
++  await move(page, "e7e5");
++  await move(page, "f1c4");
++  await move(page, "b8c6");
++  await move(page, "d1h5");
++  await move(page, "g8f6");
++  await move(page, "h5f7");
++  const over = page.getByTestId("game-over");
++  await expect(over).toBeVisible();
++  await expect(over).toContainText("Checkmate");
++  await expect(over).toContainText("White wins");
++  await expect(sq(page, "e8")).toHaveClass(/check/);
++});
++
++test("solves a mate-in-1 puzzle", async ({ page }) => {
++  await page.goto("/?puzzle=1");
++  await move(page, "e6h3");
++  await expect(page.getByTestId("puzzle-solved")).toBeVisible();
++});
++
++test("mate-in-2: wrong move is flagged, retry works, reply is automatic, next puzzle opens", async ({ page }) => {
++  await page.goto("/?puzzle=7");
++  await move(page, "a5a6"); // legal but wrong
++  await expect(page.locator(".feedback.wrong")).toBeVisible();
++  await expect(sq(page, "a5").locator('[data-piece="wQ"]')).toHaveCount(1);
++  await move(page, "a5c7");
++  // Black's reply d5-d4 plays by itself.
++  await expect(sq(page, "d4").locator('[data-piece="bP"]')).toHaveCount(1);
++  await move(page, "a3a8");
++  await expect(page.getByTestId("puzzle-solved")).toBeVisible();
++  await page.getByRole("button", { name: "Next puzzle" }).first().click();
++  await expect(page).toHaveURL(/puzzle=8/);
++  await expect(page.getByTestId("puzzle-solved")).toHaveCount(0);
++});
++
++test("black-to-move puzzle with promotion", async ({ page }) => {
++  await page.goto("/?puzzle=5");
++  await move(page, "e2e1");
++  const picker = page.getByTestId("promotion");
++  await expect(picker).toBeVisible();
++  await picker.locator('[data-piece="q"]').click();
++  await expect(page.getByTestId("puzzle-solved")).toBeVisible();
++});
++
++test("promotion picker offers four pieces and places the choice", async ({ page }) => {
++  await page.goto("/?fen=" + encodeURIComponent("8/P3k3/8/8/8/8/8/4K3 w - - 0 1"));
++  await move(page, "a7a8");
++  const picker = page.getByTestId("promotion");
++  await expect(picker.locator("button[data-piece]")).toHaveCount(4);
++  await picker.locator('[data-piece="n"]').click();
++  await expect(sq(page, "a8").locator('[data-piece="wN"]')).toHaveCount(1);
++});
++
++test("drag to move with the mouse", async ({ page }) => {
++  await page.goto("/");
++  await drag(page, "g1", "f3");
++  await expect(sq(page, "f3").locator('[data-piece="wN"]')).toHaveCount(1);
++  await expect(sq(page, "f3")).toHaveClass(/last-move/);
++  await expect(sq(page, "g1")).toHaveClass(/last-move/);
++});
++
++test("drag with locator.dragTo, and an illegal drop snaps back", async ({ page }) => {
++  await page.goto("/");
++  await sq(page, "e2").locator("[data-piece]").dragTo(sq(page, "e5"));
++  await expect(sq(page, "e2").locator('[data-piece="wP"]')).toHaveCount(1);
++  await sq(page, "e2").locator("[data-piece]").dragTo(sq(page, "e4"));
++  await expect(sq(page, "e4").locator('[data-piece="wP"]')).toHaveCount(1);
++});
++
++test("threefold repetition ends the game as a draw", async ({ page }) => {
++  await page.goto("/");
++  for (let i = 0; i < 2; i++) for (const m of ["g1f3", "g8f6", "f3g1", "f6g8"]) await move(page, m);
++  await expect(page.getByTestId("game-over")).toContainText("Threefold repetition");
++});
++
++test("illegal moves are refused and legal targets are shown", async ({ page }) => {
++  await page.goto("/");
++  await sq(page, "e2").click();
++  await expect(sq(page, "e2")).toHaveClass(/selected/);
++  await expect(page.locator(".square.target")).toHaveCount(2);
++  await sq(page, "e5").click();
++  await expect(sq(page, "e2").locator('[data-piece="wP"]')).toHaveCount(1);
++  await expect(sq(page, "e5").locator("[data-piece]")).toHaveCount(0);
++});
++
++test("castling through the UI", async ({ page }) => {
++  await page.goto("/?fen=" + encodeURIComponent("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1"));
++  await move(page, "e1g1");
++  await expect(sq(page, "g1").locator('[data-piece="wK"]')).toHaveCount(1);
++  await expect(sq(page, "f1").locator('[data-piece="wR"]')).toHaveCount(1);
++});
++
++test("stalemate from ?fen shows a draw", async ({ page }) => {
++  await page.goto("/?fen=" + encodeURIComponent("7k/8/6K1/8/8/8/8/5Q2 w - - 0 1"));
++  await move(page, "f1f7");
++  await expect(page.getByTestId("game-over")).toContainText("Stalemate");
++});
++
++test("no horizontal scroll at 390 px", async ({ page }) => {
++  await page.setViewportSize({ width: 390, height: 844 });
++  for (const url of ["/", "/?puzzle=2"]) {
++    await page.goto(url);
++    await expect(page.locator("[data-square]")).toHaveCount(64);
++    const sw = await page.evaluate(() => document.documentElement.scrollWidth);
++    expect(sw).toBeLessThanOrEqual(390);
++  }
++});
++
++test.describe("touch", () => {
++  test.use({ hasTouch: true, isMobile: true, viewport: { width: 390, height: 844 } });
++  test("tap to move on a touch screen", async ({ page }) => {
++    await page.goto("/");
++    await sq(page, "e2").tap();
++    await sq(page, "e4").tap();
++    await expect(sq(page, "e4").locator('[data-piece="wP"]')).toHaveCount(1);
++  });
++  test("drag to move with touch", async ({ page }) => {
++    await page.goto("/");
++    const a = (await sq(page, "b1").boundingBox())!, b = (await sq(page, "c3").boundingBox())!;
++    const cdp = await page.context().newCDPSession(page);
++    const point = (x: number, y: number) => [{ x, y, id: 1 }];
++    const ax = a.x + a.width / 2, ay = a.y + a.height / 2, bx = b.x + b.width / 2, by = b.y + b.height / 2;
++    await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: point(ax, ay) });
++    for (let i = 1; i <= 8; i++) {
++      await cdp.send("Input.dispatchTouchEvent", { type: "touchMove", touchPoints: point(ax + ((bx - ax) * i) / 8, ay + ((by - ay) * i) / 8) });
++    }
++    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
++    await expect(sq(page, "c3").locator('[data-piece="wN"]')).toHaveCount(1);
++    await expect(sq(page, "b1").locator("[data-piece]")).toHaveCount(0);
++  });
++});
+diff --git a/tests/screenshots/playwright.config.ts b/tests/screenshots/playwright.config.ts
+new file mode 100644
+index 0000000..17c3f7b
+--- /dev/null
++++ b/tests/screenshots/playwright.config.ts
+@@ -0,0 +1,11 @@
++import { defineConfig, devices } from "@playwright/test";
++
++const port = Number(process.env.PORT) || 5173;
++
++export default defineConfig({
++  testDir: ".",
++  outputDir: "../../.playwright/screenshot-results",
++  use: { baseURL: `http://localhost:${port}` },
++  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
++  webServer: { command: "npm run dev", port, reuseExistingServer: false, cwd: "../.." },
++});
+diff --git a/tests/screenshots/shots.spec.ts b/tests/screenshots/shots.spec.ts
+new file mode 100644
+index 0000000..8ddaccb
+--- /dev/null
++++ b/tests/screenshots/shots.spec.ts
+@@ -0,0 +1,47 @@
++// Not part of `npm run e2e` (testDir is tests/e2e). Run with:
++//   npx playwright test --config tests/screenshots/playwright.config.ts
++import { test, type Page } from "@playwright/test";
++
++const sq = (page: Page, n: string) => page.locator(`[data-square="${n}"]`);
++async function move(page: Page, uci: string) {
++  await sq(page, uci.slice(0, 2)).click();
++  await sq(page, uci.slice(2, 4)).click();
++}
++
++for (const scheme of ["light", "dark"] as const) {
++  for (const width of [390, 1280]) {
++    test(`${scheme} ${width}`, async ({ page }) => {
++      await page.emulateMedia({ colorScheme: scheme });
++      await page.setViewportSize({ width, height: width === 390 ? 844 : 800 });
++      const shot = async (name: string) => {
++        await page.waitForTimeout(350);
++        await page.screenshot({ path: `.playwright/${name}-${width}-${scheme}.png`, fullPage: true });
++      };
++      await page.goto("/");
++      await move(page, "e2e4");
++      await move(page, "e7e5");
++      await move(page, "f1c4");
++      await move(page, "b8c6");
++      await sq(page, "d1").click();
++      await shot("play");
++      await sq(page, "h5").click();
++      await move(page, "g8f6");
++      await move(page, "h5f7");
++      await shot("gameover");
++      await page.getByRole("button", { name: "View board" }).click();
++      await shot("checkmated");
++      await page.goto("/?puzzle=7");
++      await move(page, "a5a6");
++      await shot("puzzle-wrong");
++      await move(page, "a5c7");
++      await shot("puzzle-reply");
++      await move(page, "a3a8");
++      await shot("puzzle-solved");
++      await page.goto("/?fen=" + encodeURIComponent("8/P3k3/8/8/8/8/8/4K3 w - - 0 1"));
++      await move(page, "a7a8");
++      await shot("promotion");
++      await page.goto("/?fen=" + encodeURIComponent("rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"));
++      await page.locator(".board").screenshot({ path: `.playwright/pieces-${width}-${scheme}.png` });
++    });
++  }
++}
+diff --git a/tests/unit/perft.test.ts b/tests/unit/perft.test.ts
+new file mode 100644
+index 0000000..12dc3df
+--- /dev/null
++++ b/tests/unit/perft.test.ts
+@@ -0,0 +1,39 @@
++import { describe, expect, it } from "vitest";
++import { Position, START_FEN, perft } from "../../src/chess.ts";
++
++const KIWIPETE = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1";
++
++describe("perft", () => {
++  it.each([
++    [1, 20],
++    [2, 400],
++    [3, 8902],
++    [4, 197281],
++  ])("start position depth %i = %i", (depth, nodes) => {
++    expect(perft(Position.fromFen(START_FEN), depth)).toBe(nodes);
++  });
++
++  it.each([
++    [1, 48],
++    [2, 2039],
++    [3, 97862],
++  ])("Kiwipete depth %i = %i", (depth, nodes) => {
++    expect(perft(Position.fromFen(KIWIPETE), depth)).toBe(nodes);
++  });
++
++  // Extra standard positions that stress en passant, promotion and pins.
++  it("position 3 depth 4 = 43238", () => {
++    expect(perft(Position.fromFen("8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1"), 4)).toBe(43238);
++  });
++  it("position 4 depth 3 = 9467", () => {
++    expect(perft(Position.fromFen("r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1"), 3)).toBe(9467);
++  });
++  it("position 5 depth 3 = 62379", () => {
++    expect(perft(Position.fromFen("rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8"), 3)).toBe(62379);
++  });
++
++  it("FEN round-trips", () => {
++    expect(Position.fromFen(KIWIPETE).fen()).toBe(KIWIPETE);
++    expect(Position.fromFen(START_FEN).fen()).toBe(START_FEN);
++  });
++});
+diff --git a/tests/unit/puzzles.test.ts b/tests/unit/puzzles.test.ts
+new file mode 100644
+index 0000000..5f61eec
+--- /dev/null
++++ b/tests/unit/puzzles.test.ts
+@@ -0,0 +1,17 @@
++import { describe, expect, it } from "vitest";
++import { Game } from "../../src/chess.ts";
++import puzzles from "../../public/puzzles.json";
++
++describe("puzzle data", () => {
++  it("has 12 puzzles", () => expect(puzzles).toHaveLength(12));
++  it.each(puzzles.map((p) => [p.id, p] as const))("puzzle %i solution is legal and mates", (_id, p) => {
++    const g = new Game(p.fen);
++    for (const uci of p.solution) {
++      const m = g.findUci(uci);
++      expect(m, uci).toBeDefined();
++      g.play(m!);
++    }
++    expect(g.status().reason).toBe("checkmate");
++    expect(p.solution.length).toBe(p.type === "mate-in-1" ? 1 : 3);
++  });
++});
+diff --git a/tests/unit/rules.test.ts b/tests/unit/rules.test.ts
+new file mode 100644
+index 0000000..fbe0366
+--- /dev/null
++++ b/tests/unit/rules.test.ts
+@@ -0,0 +1,203 @@
++import { describe, expect, it } from "vitest";
++import { Game, Position, moveToUci, parseSquare } from "../../src/chess.ts";
++
++const uciMoves = (fen: string) => new Game(fen).moves().map(moveToUci);
++const playAll = (g: Game, list: string[]) => {
++  for (const u of list) {
++    const m = g.findUci(u);
++    if (!m) throw new Error(`not legal: ${u}`);
++    g.play(m);
++  }
++};
++
++describe("legal moves (item 3)", () => {
++  it("rejects moves that leave the king in check", () => {
++    // The e2 knight is pinned by the rook on e8.
++    const moves = uciMoves("4r1k1/8/8/8/8/8/4N3/4K3 w - - 0 1");
++    expect(moves.some((m) => m.startsWith("e2"))).toBe(false);
++  });
++  it("Game.play throws on an illegal move", () => {
++    const g = new Game();
++    expect(() => g.play({ from: parseSquare("e2"), to: parseSquare("e5"), color: "w", piece: "p", flag: "normal" })).toThrow();
++  });
++});
++
++describe("castling (item 4)", () => {
++  const base = "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1";
++  it("allows both sides when legal", () => {
++    const m = uciMoves(base);
++    expect(m).toContain("e1g1");
++    expect(m).toContain("e1c1");
++    const b = uciMoves(base.replace(" w ", " b "));
++    expect(b).toContain("e8g8");
++    expect(b).toContain("e8c8");
++  });
++  it("moves the rook too", () => {
++    const g = new Game(base);
++    playAll(g, ["e1g1"]);
++    expect(g.pos.fen().split(" ")[0]).toBe("r3k2r/8/8/8/8/8/8/R4RK1");
++    playAll(g, ["e8c8"]);
++    expect(g.pos.fen().split(" ")[0]).toBe("2kr3r/8/8/8/8/8/8/R4RK1");
++  });
++  it("not after the king has moved", () => {
++    const g = new Game(base);
++    playAll(g, ["e1f1", "a8b8", "f1e1", "b8a8"]);
++    expect(g.moves().map(moveToUci)).not.toContain("e1g1");
++    expect(g.moves().map(moveToUci)).not.toContain("e1c1");
++  });
++  it("not on the side whose rook has moved", () => {
++    const g = new Game(base);
++    playAll(g, ["h1h2", "a8a7", "h2h1", "a7a8"]);
++    const m = g.moves().map(moveToUci);
++    expect(m).not.toContain("e1g1");
++    expect(m).toContain("e1c1");
++  });
++  it("not when the rook was captured", () => {
++    const g = new Game("r3k2r/8/8/8/8/8/6b1/R3K2R b KQkq - 0 1");
++    playAll(g, ["g2h1"]);
++    expect(g.moves().map(moveToUci)).not.toContain("e1g1");
++  });
++  it("not with pieces in between", () => {
++    const m = uciMoves("r3k2r/8/8/8/8/8/8/RN2K1NR w KQkq - 0 1");
++    expect(m).not.toContain("e1g1");
++    expect(m).not.toContain("e1c1");
++  });
++  it("not out of check", () => {
++    const m = uciMoves("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1".replace("r3k2r/8", "r3k2r/4r3"));
++    expect(m).not.toContain("e1g1");
++    expect(m).not.toContain("e1c1");
++  });
++  it("not through check", () => {
++    // Black rook on f8 covers f1; black rook on d8 covers d1.
++    const m = uciMoves("3rkr2/8/8/8/8/8/8/R3K2R w KQ - 0 1");
++    expect(m).not.toContain("e1g1");
++    expect(m).not.toContain("e1c1");
++  });
++  it("not into check", () => {
++    const m = uciMoves("2r1k1r1/8/8/8/8/8/8/R3K2R w KQ - 0 1");
++    expect(m).not.toContain("e1g1");
++    expect(m).not.toContain("e1c1");
++  });
++  it("queen side allowed when only b1 is attacked", () => {
++    const m = uciMoves("1r2k3/8/8/8/8/8/8/R3K3 w Q - 0 1");
++    expect(m).toContain("e1c1");
++  });
++});
++
++describe("en passant (item 5)", () => {
++  it("is available right after the double step and removes the pawn", () => {
++    const g = new Game("4k3/3p4/8/4P3/8/8/8/4K3 b - - 0 1");
++    playAll(g, ["d7d5"]);
++    expect(g.moves().map(moveToUci)).toContain("e5d6");
++    playAll(g, ["e5d6"]);
++    expect(g.pos.fen().split(" ")[0]).toBe("4k3/8/3P4/8/8/8/8/4K3");
++  });
++  it("is gone one move later", () => {
++    const g = new Game("4k3/3p4/8/4P3/8/8/8/4K3 b - - 0 1");
++    playAll(g, ["d7d5", "e1f1", "e8f8"]);
++    expect(g.moves().map(moveToUci)).not.toContain("e5d6");
++  });
++  it("is not available after a single step", () => {
++    const g = new Game("4k3/3p4/8/4P3/8/8/8/4K3 b - - 0 1");
++    playAll(g, ["d7d6", "e1f1", "d6d5"]);
++    expect(g.moves().map(moveToUci)).not.toContain("e5d6");
++  });
++  it("is illegal when it exposes the king", () => {
++    // Capturing en passant would clear the fifth rank between king and rook.
++    const m = uciMoves("8/8/8/KPp4r/8/8/8/4k3 w - c6 0 2");
++    expect(m).not.toContain("b5c6");
++  });
++});
++
++describe("promotion (item 6)", () => {
++  it("offers all four pieces", () => {
++    const m = uciMoves("8/P3k3/8/8/8/8/8/4K3 w - - 0 1").filter((u) => u.startsWith("a7a8"));
++    expect(m.sort()).toEqual(["a7a8b", "a7a8n", "a7a8q", "a7a8r"]);
++  });
++  it("places the chosen piece", () => {
++    for (const p of ["q", "r", "b", "n"]) {
++      const g = new Game("8/P3k3/8/8/8/8/8/4K3 w - - 0 1");
++      playAll(g, ["a7a8" + p]);
++      expect(g.pos.fen().split(" ")[0]).toBe(`${p.toUpperCase()}7/4k3/8/8/8/8/8/4K3`);
++    }
++  });
++  it("works with a capture, for black too", () => {
++    const g = new Game("4k3/8/8/8/8/8/p7/1N2K3 b - - 0 1");
++    playAll(g, ["a2b1n"]);
++    expect(g.pos.fen().split(" ")[0]).toBe("4k3/8/8/8/8/8/8/1n2K3");
++  });
++});
++
++describe("check (item 7)", () => {
++  it("is detected", () => {
++    const g = new Game("4k3/8/8/8/8/8/8/4K2R w - - 0 1");
++    expect(g.status().check).toBe(false);
++    playAll(g, ["h1h8"]);
++    expect(g.status().check).toBe(true);
++    expect(g.history[0].san).toBe("Rh8+");
++  });
++});
++
++describe("checkmate and stalemate (item 8)", () => {
++  it("fool's mate ends the game, black wins", () => {
++    const g = new Game();
++    playAll(g, ["f2f3", "e7e5", "g2g4", "d8h4"]);
++    expect(g.status()).toMatchObject({ over: true, reason: "checkmate", winner: "b" });
++    expect(g.history[3].san).toBe("Qh4#");
++  });
++  it("stalemate ends the game as a draw", () => {
++    const g = new Game("7k/8/6K1/8/8/8/8/5Q2 w - - 0 1");
++    playAll(g, ["f1f7"]);
++    expect(g.status()).toMatchObject({ over: true, reason: "stalemate" });
++    expect(g.status().winner).toBeUndefined();
++  });
++  it("no more moves after the end", () => {
++    const g = new Game("7k/5Q2/6K1/8/8/8/8/8 b - - 0 1");
++    expect(g.status().reason).toBe("stalemate");
++  });
++});
++
++describe("draws (item 9)", () => {
++  it("threefold repetition", () => {
++    const g = new Game();
++    const shuffle = ["g1f3", "g8f6", "f3g1", "f6g8"];
++    playAll(g, shuffle);
++    expect(g.status().over).toBe(false); // start position seen twice
++    playAll(g, shuffle.slice(0, 3));
++    expect(g.status().over).toBe(false);
++    playAll(g, shuffle.slice(3));
++    expect(g.status()).toMatchObject({ over: true, reason: "threefold" });
++  });
++  it("repetition needs the same castling rights", () => {
++    const g = new Game("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1");
++    // King steps lose castling rights, so the first position never comes back.
++    playAll(g, ["e1f1", "e8f8", "f1e1", "f8e8", "e1f1", "e8f8", "f1e1", "f8e8"]);
++    expect(g.repetitions()).toBe(2);
++    expect(g.status().over).toBe(false);
++  });
++  it("fifty-move rule", () => {
++    const g = new Game("4k3/8/8/8/8/8/8/R3K3 w - - 99 80");
++    expect(g.status().over).toBe(false);
++    playAll(g, ["a1a2"]);
++    expect(g.status()).toMatchObject({ over: true, reason: "fifty-move" });
++  });
++  it("a pawn move resets the fifty-move count", () => {
++    const g = new Game("4k3/8/8/8/8/8/P7/R3K3 w - - 99 80");
++    playAll(g, ["a2a3"]);
++    expect(g.pos.halfmove).toBe(0);
++    expect(g.status().over).toBe(false);
++  });
++  it("checkmate on the 100th half-move counts as mate", () => {
++    const g = new Game("k7/8/1K6/8/8/8/8/7R w - - 99 80");
++    playAll(g, ["h1h8"]);
++    expect(g.status().reason).toBe("checkmate");
++  });
++});
++
++describe("FEN validation", () => {
++  it("rejects bad FENs", () => {
++    expect(() => Position.fromFen("nonsense")).toThrow();
++    expect(() => Position.fromFen("8/8/8/8/8/8/8/8 w - - 0 1")).toThrow();
++    expect(() => Position.fromFen("4k3/8/8/8/8/8/8/4K2R x - - 0 1")).toThrow();
++  });
++});
