@@ -299,7 +299,7 @@ export class App {
     const st = this.game.status();
     if (st.state !== "playing") {
       const r = this.resultText(st);
-      return `<span class="dot over"></span>${r.title} ${r.detail}`;
+      return `<span class="dot ended"></span>${r.title} ${r.detail}`;
     }
     const side = this.game.turn();
     return `<span class="dot ${side}"></span>${NAME[side]} to move${
