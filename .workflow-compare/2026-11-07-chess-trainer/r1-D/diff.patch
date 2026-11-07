@@ -1,0 +1,2330 @@
+diff --git a/CHECKLIST-RESULTS.md b/CHECKLIST-RESULTS.md
+new file mode 100644
+index 0000000..b7b6d66
+--- /dev/null
++++ b/CHECKLIST-RESULTS.md
+@@ -0,0 +1,34 @@
++# Checklist pass
++
++Saved as `CHECKLIST-RESULTS.md`: this macOS filesystem is case-insensitive, so `CHECKLIST.md` would overwrite the tracked `checklist.md`.
++
++No line failed, so no code was changed. Checks were run against the code, the test suites and the running app (Playwright, Chromium, dev server on a spare port).
++
++| # | Result | Note |
++|---|--------|------|
++| 1 | met | Pass and play from the standard start; covered by the checkmate e2e. |
++| 2 | met | All 12 puzzles solved through the UI in a Playwright sweep. A wrong move is flagged and taken back, the defender reply is automatic in mate-in-2, `puzzle-solved` shows, and Next works. |
++| 3 | met | Engine rejects illegal moves (unit tests); UI offers legal targets only. |
++| 4 | met | Castling unit tests cover both sides and both colours, and every refusal case. |
++| 5 | met | En passant tests include expiry and the exposed-king case. |
++| 6 | met | Picker with 4 buttons; e2e promotes to a knight. |
++| 7 | met | The king square gets a `check` class and the status line shows "Check". |
++| 8 | met | Game-over modal shows the result. Checkmate by e2e, stalemate by unit test. |
++| 9 | met | Threefold and 50-move are automatic and unit-tested. |
++| 10 | met | SVG built in `src/ui/pieces.ts`; no font-face, images or glyph characters found in the source. |
++| 11 | met | Screenshots at 390 and 1280 px look fine. Overflow is 0 at 390 px on `/`, `?puzzle` and `?fen`. |
++| 12 | met | Dark and light verified with `colorScheme` emulation via a `prefers-color-scheme` media query. |
++| 13 | met | Tap-to-move works with mouse and touch; legal targets are shown. |
++| 14 | met | Pointer-event drag (mouse covered by e2e); `touch-action: none` is set on the board. A real touch drag was not run, only a touch tap. |
++| 15 | met | `selected` and `last` classes are applied in `board-view.ts`. |
++| 16 | met | Start 1–4 and Kiwipete 1–3 have the right counts, plus extra positions. |
++| 17 | met | `rules.test.ts` has tests for castling, en passant, promotion, check, mate, stalemate and draws. |
++| 18 | met | One puzzle e2e and one checkmate e2e; both pass. |
++| 19 | met | Scripts exist and pass. `npm run dev` honours `$PORT` (default 5173). `$PORT` was unset in this session, so I ran servers on other ports. |
++| 20 | met | `npm run -s perft -- "<fen>" 3` prints `97862`. Plain `npm run` also prints npm's own banner (see NOTES.md). |
++| 21 | met | `data-square` on all 64 squares and `data-piece` on pieces, e.g. `wK`. |
++| 22 | met | `?fen=` and `?puzzle=` work, with notices for invalid values. |
++| 23 | met | `promotion`, `game-over` and `puzzle-solved` test ids are present. |
++| 24 | met | 69 unit tests, 4 e2e tests and the build pass. No console errors or warnings on any page tried. |
++
++Readings of unclear lines: 20 is taken to mean the script's own stdout, since npm adds a banner. For 11, "polished" was judged from screenshots.
+diff --git a/NOTES.md b/NOTES.md
+new file mode 100644
+index 0000000..8bdcc25
+--- /dev/null
++++ b/NOTES.md
+@@ -0,0 +1,21 @@
++# Notes: readings of unclear points in the brief
++
++- **Puzzle answers:** a move counts as correct if it matches the listed UCI solution move
++  or if it gives checkmate on the spot, so another mate in a mate-in-1 also solves it.
++  In mate-in-2 puzzles, any other first move is flagged as wrong and taken back.
++- **Wrong puzzle move:** the move is shown for a moment with a red highlight and a
++  "Try again" message, then taken back so the player can try again right away.
++- **Puzzle side:** the board is turned so the side to move is at the bottom.
++- **`?fen=` with an invalid FEN:** a notice is shown and a normal game starts from the
++  standard position. **`?puzzle=n` out of range:** a notice is shown and puzzle 1 opens.
++- **`?puzzle` and `?fen` together:** `?puzzle` wins.
++- **Game over:** a modal (`data-testid="game-over"`) shows the result, with "New game"
++  and "View board" buttons. In puzzle mode the puzzle-solved banner is shown instead of
++  the game-over modal.
++- **Draws:** threefold repetition and the 50-move rule end the game on their own, with no
++  claim needed. The en passant square only counts toward repetition when an en passant
++  capture is actually legal.
++- **Perft CLI:** `npm run perft -- "<fen>" <depth>` writes only the count to the
++  script's stdout. npm adds its own `> script` banner unless you use `npm run --silent`
++  (or `-s`); that banner comes from npm and cannot be turned off from inside the script.
++- **Undo** is available in two-player mode only.
+diff --git a/docs/design.md b/docs/design.md
+new file mode 100644
+index 0000000..5ed1754
+--- /dev/null
++++ b/docs/design.md
+@@ -0,0 +1,115 @@
++# Design spec
++
++## Module layout
++
++```
++src/
++  engine/
++    types.ts       shared types (below)
++    board.ts       FEN parse/serialise, square helpers
++    movegen.ts     pseudo-legal + legal move generation, attack detection
++    game.ts        Game class: history, make/undo, status, repetition, 50-move
++    perft.ts       perft(position, depth)
++    index.ts       re-exports the public API
++  engine/*.test.ts unit tests (vitest), incl. perft.test.ts
++  ui/
++    pieces.ts      original SVG piece drawings (strings per piece)
++    board-view.ts  renders board, highlights, tap + pointer drag
++    app.ts         modes (play / puzzle), URL params, panels, dialogs
++  styles.css
++  main.ts          entry; mounts app
++scripts/perft.ts   CLI: `npm run perft -- "<fen>" <depth>` prints only the count
++tests/e2e/*.spec.ts Playwright
++```
++
++The engine has no DOM dependencies. It must run under plain Node 25 with type
++stripping (`node scripts/perft.ts`), so: relative imports **with `.ts` extensions**,
++no enums, no parameter properties, no namespaces (tsconfig has
++`erasableSyntaxOnly`). `import type` for types (`verbatimModuleSyntax`).
++
++## Engine API
++
++```ts
++export type Color = "w" | "b";
++export type PieceType = "p" | "n" | "b" | "r" | "q" | "k";
++export interface Piece { color: Color; type: PieceType }
++export type Square = string;            // "a1".."h8"
++
++export interface Move {
++  from: Square; to: Square;
++  piece: PieceType;
++  captured?: PieceType;
++  promotion?: "q" | "r" | "b" | "n";
++  flags: { enPassant?: boolean; castle?: "k" | "q"; doublePush?: boolean };
++  san?: string;                          // filled by Game.move (nice to have)
++}
++
++export type GameStatus =
++  | { state: "playing"; check: boolean }
++  | { state: "checkmate"; winner: Color }
++  | { state: "stalemate" }
++  | { state: "draw"; reason: "threefold" | "fifty-move" };
++
++export const START_FEN: string;
++
++export class Game {
++  constructor(fen?: string);                 // throws Error on invalid FEN
++  fen(): string;
++  turn(): Color;
++  board(): (Piece | null)[][];               // [rank 8..1][file a..h], row 0 = rank 8
++  get(sq: Square): Piece | null;
++  legalMoves(from?: Square): Move[];         // all legal moves, or from one square
++  move(m: { from: Square; to: Square; promotion?: "q"|"r"|"b"|"n" }): Move | null; // null if illegal
++  moveUci(uci: string): Move | null;         // "e2e4", "e7e8q"
++  undo(): Move | null;
++  inCheck(): boolean;
++  kingSquare(c: Color): Square;
++  status(): GameStatus;
++  isGameOver(): boolean;
++  history(): Move[];
++  lastMove(): Move | null;
++}
++
++export function perft(game: Game, depth: number): number;
++export function isValidFen(fen: string): boolean;
++```
++
++Rules: legal moves only; castling both sides (king & rook unmoved per castling
++rights, squares between empty, king not in/through/into check); en passant only
++immediately after the double step; promotion to q/r/b/n (a pawn move to the last
++rank without `promotion` is illegal via `move()` — UI asks first; `legalMoves`
++returns one Move per promotion piece); check/checkmate/stalemate; threefold
++repetition (position key = placement + side + castling + *legal* ep square) and
++50-move rule (halfmove clock ≥ 100) end the game automatically as a draw.
++Checkmate takes priority over the 50-move draw.
++
++Performance target: perft start depth 4 well under 5 s in vitest.
++
++## Visual direction
++
++- **Board:** square, wood-free flat look. Light theme squares `#eae6dc` / `#8a9a7b`
++  (sage). Dark theme squares `#3d4450` / `#262b33`, page `#15181d`.
++  Coordinates (files/ranks) drawn small inside edge squares.
++- **Highlights:** last move = translucent amber overlay on from/to; selected =
++  stronger amber; legal targets = centred dot (capture = ring); king in check =
++  radial red glow.
++- **Pieces:** original geometric SVG set, viewBox 0 0 100 100: rounded bases,
++  simple silhouettes (pawn = circle on a trapezoid, rook = crenellated block,
++  knight = angular head built from polygons, bishop = mitre with slit, queen =
++  five-point crown with balls, king = crown with cross). White pieces fill
++  `#fbfaf6` stroke `#2a2a2a`; black fill `#2b2d33` stroke `#0d0d0f` with light
++  detail lines. Stroke width ~3.
++- **Typography:** system UI stack. Accent colour: amber `#d99a2b`.
++- **Layout 390 px:** single column; header (title + mode tabs "Play" /
++  "Puzzles"), board full-width (`min(100vw - 16px, 560px)`), status line
++  under the board, controls row (New game / Undo / Flip; or Puzzle nav).
++  No horizontal scroll.
++- **Layout 1280 px:** two columns centred, board ~ min(80vh, 640px) on the
++  left, side panel (320 px) on the right with status, move list, controls,
++  puzzle info.
++- **Dialogs:** promotion picker as a small overlay over the board with four
++  piece buttons (`data-testid="promotion"`, buttons `data-piece="q|r|b|n"`).
++  Game-over as a modal card (`data-testid="game-over"`) with result text and
++  "New game" button. Puzzle solved: a banner in the panel
++  (`data-testid="puzzle-solved"`) with "Next puzzle".
++- Themes via CSS custom properties switched by `@media (prefers-color-scheme: dark)`.
+diff --git a/package.json b/package.json
+index ce53873..72b7d84 100644
+--- a/package.json
++++ b/package.json
+@@ -8,6 +8,7 @@
+     "build": "tsc && vite build",
+     "preview": "vite preview",
+     "test": "vitest run --passWithNoTests",
++    "perft": "node scripts/perft.ts",
+     "e2e": "playwright test --pass-with-no-tests"
+   },
+   "devDependencies": {
+diff --git a/scripts/perft.ts b/scripts/perft.ts
+new file mode 100644
+index 0000000..5f8c1be
+--- /dev/null
++++ b/scripts/perft.ts
+@@ -0,0 +1,15 @@
++import { Game } from "../src/engine/game.ts";
++import { perft } from "../src/engine/perft.ts";
++
++const fen = process.argv[2];
++const depth = Number(process.argv[3]);
++if (!fen || !Number.isInteger(depth) || depth < 0) {
++  console.error('usage: npm run perft -- "<fen>" <depth>');
++  process.exit(1);
++}
++try {
++  console.log(perft(new Game(fen), depth));
++} catch (e) {
++  console.error(e instanceof Error ? e.message : String(e));
++  process.exit(1);
++}
+diff --git a/scripts/screenshots.mjs b/scripts/screenshots.mjs
+new file mode 100644
+index 0000000..894e642
+--- /dev/null
++++ b/scripts/screenshots.mjs
+@@ -0,0 +1,46 @@
++// Takes screenshots of a running dev server: node scripts/screenshots.mjs <baseURL>
++import { chromium } from "@playwright/test";
++
++const base = process.argv[2] ?? `http://localhost:${process.env.PORT || 5173}`;
++const browser = await chromium.launch();
++const shots = [
++  ["play", "/"],
++  ["puzzle", "/?puzzle=8"],
++];
++for (const scheme of ["light", "dark"]) {
++  for (const width of [390, 1280]) {
++    const ctx = await browser.newContext({
++      viewport: { width, height: width === 390 ? 844 : 800 },
++      colorScheme: scheme,
++      deviceScaleFactor: 1,
++    });
++    const page = await ctx.newPage();
++    page.on("console", (m) => m.type() === "error" && console.log("console error:", m.text()));
++    for (const [name, path] of shots) {
++      await page.goto(base + path);
++      await page.waitForSelector("[data-square]");
++      if (name === "play") {
++        // Select a piece after a couple of moves to show highlights.
++        for (const [a, b] of [["e2", "e4"], ["e7", "e5"]]) {
++          await page.click(`[data-square="${a}"]`);
++          await page.click(`[data-square="${b}"]`);
++        }
++        await page.click('[data-square="g1"]');
++      }
++      await page.screenshot({ path: `.playwright/${name}-${width}-${scheme}.png`, fullPage: true });
++    }
++    // Game over + promotion states at each size.
++    await page.goto(base + "/");
++    for (const [a, b] of [["f2", "f3"], ["e7", "e5"], ["g2", "g4"], ["d8", "h4"]]) {
++      await page.click(`[data-square="${a}"]`);
++      await page.click(`[data-square="${b}"]`);
++    }
++    await page.screenshot({ path: `.playwright/gameover-${width}-${scheme}.png`, fullPage: true });
++    await page.goto(base + "/?fen=" + encodeURIComponent("8/4P3/8/8/8/8/k7/4K3 w - - 0 1"));
++    await page.click('[data-square="e7"]');
++    await page.click('[data-square="e8"]');
++    await page.screenshot({ path: `.playwright/promo-${width}-${scheme}.png`, fullPage: true });
++    await ctx.close();
++  }
++}
++await browser.close();
+diff --git a/src/engine/board.ts b/src/engine/board.ts
+new file mode 100644
+index 0000000..8e3536e
+--- /dev/null
++++ b/src/engine/board.ts
+@@ -0,0 +1,115 @@
++import type { Color, Piece, PieceType, Square } from "./types.ts";
++
++export const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
++
++/** Internal position. Square index = row*8 + file, row 0 = rank 8. Pieces: "PNBRQK" white, "pnbrqk" black, "" empty. */
++export interface Position {
++  sq: string[];
++  turn: Color;
++  castling: number; // bits: K=1 Q=2 k=4 q=8
++  ep: number; // en passant target index or -1
++  half: number;
++  full: number;
++}
++
++export const FILES = "abcdefgh";
++
++export function sqName(i: number): Square {
++  return FILES[i & 7] + String(8 - (i >> 3));
++}
++
++export function sqIndex(s: Square): number {
++  if (typeof s !== "string" || s.length !== 2) return -1;
++  const f = FILES.indexOf(s[0]);
++  const r = s.charCodeAt(1) - 48;
++  if (f < 0 || r < 1 || r > 8) return -1;
++  return (8 - r) * 8 + f;
++}
++
++export function colorOf(p: string): Color {
++  return p === p.toUpperCase() ? "w" : "b";
++}
++
++export function toPiece(p: string): Piece | null {
++  if (!p) return null;
++  return { color: colorOf(p), type: p.toLowerCase() as PieceType };
++}
++
++export function parseFen(fen: string): Position {
++  if (typeof fen !== "string") throw new Error("Invalid FEN");
++  const parts = fen.trim().split(/\s+/);
++  if (parts.length < 4 || parts.length > 6) throw new Error("Invalid FEN: field count");
++  const rows = parts[0].split("/");
++  if (rows.length !== 8) throw new Error("Invalid FEN: ranks");
++  const sq: string[] = [];
++  for (const row of rows) {
++    let n = 0;
++    for (const ch of row) {
++      if (/[1-8]/.test(ch)) {
++        for (let k = 0; k < Number(ch); k++) sq.push("");
++        n += Number(ch);
++      } else if (/[pnbrqkPNBRQK]/.test(ch)) {
++        sq.push(ch);
++        n++;
++      } else throw new Error("Invalid FEN: piece");
++    }
++    if (n !== 8) throw new Error("Invalid FEN: rank width");
++  }
++  if (parts[1] !== "w" && parts[1] !== "b") throw new Error("Invalid FEN: turn");
++  const turn = parts[1] as Color;
++  let castling = 0;
++  if (parts[2] !== "-") {
++    if (!/^[KQkq]+$/.test(parts[2])) throw new Error("Invalid FEN: castling");
++    if (parts[2].includes("K")) castling |= 1;
++    if (parts[2].includes("Q")) castling |= 2;
++    if (parts[2].includes("k")) castling |= 4;
++    if (parts[2].includes("q")) castling |= 8;
++  }
++  // drop rights that cannot exist
++  if (sq[60] !== "K") castling &= ~3;
++  if (sq[4] !== "k") castling &= ~12;
++  if (sq[63] !== "R") castling &= ~1;
++  if (sq[56] !== "R") castling &= ~2;
++  if (sq[7] !== "r") castling &= ~4;
++  if (sq[0] !== "r") castling &= ~8;
++  let ep = -1;
++  if (parts[3] !== "-") {
++    ep = sqIndex(parts[3]);
++    if (ep < 0) throw new Error("Invalid FEN: en passant");
++    const wantRow = turn === "w" ? 2 : 5;
++    if (ep >> 3 !== wantRow) throw new Error("Invalid FEN: en passant rank");
++  }
++  const half = parts.length > 4 ? Number(parts[4]) : 0;
++  const full = parts.length > 5 ? Number(parts[5]) : 1;
++  if (!Number.isInteger(half) || half < 0) throw new Error("Invalid FEN: halfmove");
++  if (!Number.isInteger(full) || full < 1) throw new Error("Invalid FEN: fullmove");
++  let wk = 0;
++  let bk = 0;
++  for (let i = 0; i < 64; i++) {
++    if (sq[i] === "K") wk++;
++    if (sq[i] === "k") bk++;
++    if ((sq[i] === "P" || sq[i] === "p") && (i < 8 || i >= 56)) throw new Error("Invalid FEN: pawn on back rank");
++  }
++  if (wk !== 1 || bk !== 1) throw new Error("Invalid FEN: kings");
++  return { sq, turn, castling, ep, half, full };
++}
++
++export function toFen(pos: Position): string {
++  let out = "";
++  for (let r = 0; r < 8; r++) {
++    let empty = 0;
++    for (let f = 0; f < 8; f++) {
++      const p = pos.sq[r * 8 + f];
++      if (!p) empty++;
++      else {
++        if (empty) out += empty;
++        empty = 0;
++        out += p;
++      }
++    }
++    if (empty) out += empty;
++    if (r < 7) out += "/";
++  }
++  const c = (pos.castling & 1 ? "K" : "") + (pos.castling & 2 ? "Q" : "") + (pos.castling & 4 ? "k" : "") + (pos.castling & 8 ? "q" : "");
++  return `${out} ${pos.turn} ${c || "-"} ${pos.ep >= 0 ? sqName(pos.ep) : "-"} ${pos.half} ${pos.full}`;
++}
+diff --git a/src/engine/game.ts b/src/engine/game.ts
+new file mode 100644
+index 0000000..eaa2307
+--- /dev/null
++++ b/src/engine/game.ts
+@@ -0,0 +1,170 @@
++import type { Color, GameStatus, Move, Piece, Square } from "./types.ts";
++import { START_FEN, parseFen, sqIndex, sqName, toFen, toPiece } from "./board.ts";
++import type { Position } from "./board.ts";
++import { findKing, inCheck, legalMoves, makeMove, unmakeMove } from "./movegen.ts";
++import type { IMove, Undo } from "./movegen.ts";
++
++export { START_FEN };
++
++type Promo = "q" | "r" | "b" | "n";
++
++interface Entry {
++  im: IMove;
++  undo: Undo;
++  move: Move;
++}
++
++function toMove(m: IMove): Move {
++  const flags: Move["flags"] = {};
++  if (m.ep) flags.enPassant = true;
++  if (m.castle) flags.castle = m.castle;
++  if (m.dbl) flags.doublePush = true;
++  const out: Move = { from: sqName(m.from), to: sqName(m.to), piece: m.piece.toLowerCase() as Move["piece"], flags };
++  if (m.cap) out.captured = m.cap.toLowerCase() as Move["piece"];
++  if (m.promo) out.promotion = m.promo as Promo;
++  return out;
++}
++
++export function isValidFen(fen: string): boolean {
++  try {
++    const pos = parseFen(fen);
++    // side not to move must not be in check
++    return !inCheck(pos, pos.turn === "w" ? "b" : "w");
++  } catch {
++    return false;
++  }
++}
++
++export class Game {
++  private pos: Position;
++  private stack: Entry[] = [];
++  private keys: string[] = [];
++
++  constructor(fen: string = START_FEN) {
++    if (!isValidFen(fen)) throw new Error(`Invalid FEN: ${fen}`);
++    this.pos = parseFen(fen);
++    this.keys.push(this.key());
++  }
++
++  private key(): string {
++    const p = this.pos;
++    const f = toFen({ ...p, ep: -1, half: 0, full: 0 }).split(" ");
++    let ep = "-";
++    if (p.ep >= 0 && legalMoves(p).some((m) => m.ep)) ep = sqName(p.ep);
++    return `${f[0]} ${f[1]} ${f[2]} ${ep}`;
++  }
++
++  fen(): string {
++    return toFen(this.pos);
++  }
++
++  turn(): Color {
++    return this.pos.turn;
++  }
++
++  board(): (Piece | null)[][] {
++    const rows: (Piece | null)[][] = [];
++    for (let r = 0; r < 8; r++) rows.push(this.pos.sq.slice(r * 8, r * 8 + 8).map(toPiece));
++    return rows;
++  }
++
++  get(sq: Square): Piece | null {
++    const i = sqIndex(sq);
++    return i < 0 ? null : toPiece(this.pos.sq[i]);
++  }
++
++  legalMoves(from?: Square): Move[] {
++    let all = legalMoves(this.pos);
++    if (from !== undefined) {
++      const i = sqIndex(from);
++      all = all.filter((m) => m.from === i);
++    }
++    return all.map(toMove);
++  }
++
++  move(m: { from: Square; to: Square; promotion?: Promo }): Move | null {
++    if (!m) return null;
++    const from = sqIndex(m.from);
++    const to = sqIndex(m.to);
++    if (from < 0 || to < 0) return null;
++    const promo = m.promotion ?? "";
++    const all = legalMoves(this.pos);
++    const im = all.find((x) => x.from === from && x.to === to && x.promo === promo);
++    if (!im) return null;
++    const move = toMove(im);
++    move.san = this.san(im, all);
++    const undo = makeMove(this.pos, im);
++    this.stack.push({ im, undo, move });
++    this.keys.push(this.key());
++    if (inCheck(this.pos, this.pos.turn)) move.san += legalMoves(this.pos).length === 0 ? "#" : "+";
++    return move;
++  }
++
++  private san(m: IMove, all: IMove[]): string {
++    if (m.castle) return m.castle === "k" ? "O-O" : "O-O-O";
++    const t = m.piece.toLowerCase();
++    let s = "";
++    if (t === "p") {
++      if (m.cap) s += sqName(m.from)[0] + "x";
++    } else {
++      s += t.toUpperCase();
++      const others = all.filter((x) => x.piece === m.piece && x.to === m.to && x.from !== m.from);
++      if (others.length) {
++        const sameFile = others.some((x) => (x.from & 7) === (m.from & 7));
++        const sameRank = others.some((x) => x.from >> 3 === m.from >> 3);
++        if (!sameFile) s += sqName(m.from)[0];
++        else if (!sameRank) s += sqName(m.from)[1];
++        else s += sqName(m.from);
++      }
++      if (m.cap) s += "x";
++    }
++    s += sqName(m.to);
++    if (m.promo) s += "=" + m.promo.toUpperCase();
++    return s;
++  }
++
++  moveUci(uci: string): Move | null {
++    if (typeof uci !== "string" || !/^[a-h][1-8][a-h][1-8][qrbn]?$/.test(uci)) return null;
++    const promotion = uci.length === 5 ? (uci[4] as Promo) : undefined;
++    return this.move({ from: uci.slice(0, 2), to: uci.slice(2, 4), promotion });
++  }
++
++  undo(): Move | null {
++    const e = this.stack.pop();
++    if (!e) return null;
++    this.keys.pop();
++    unmakeMove(this.pos, e.im, e.undo);
++    return e.move;
++  }
++
++  inCheck(): boolean {
++    return inCheck(this.pos, this.pos.turn);
++  }
++
++  kingSquare(c: Color): Square {
++    return sqName(findKing(this.pos, c));
++  }
++
++  status(): GameStatus {
++    const check = this.inCheck();
++    if (legalMoves(this.pos).length === 0) {
++      return check ? { state: "checkmate", winner: this.pos.turn === "w" ? "b" : "w" } : { state: "stalemate" };
++    }
++    const cur = this.keys[this.keys.length - 1];
++    if (this.keys.filter((k) => k === cur).length >= 3) return { state: "draw", reason: "threefold" };
++    if (this.pos.half >= 100) return { state: "draw", reason: "fifty-move" };
++    return { state: "playing", check };
++  }
++
++  isGameOver(): boolean {
++    return this.status().state !== "playing";
++  }
++
++  history(): Move[] {
++    return this.stack.map((e) => e.move);
++  }
++
++  lastMove(): Move | null {
++    return this.stack.length ? this.stack[this.stack.length - 1].move : null;
++  }
++}
+diff --git a/src/engine/index.ts b/src/engine/index.ts
+new file mode 100644
+index 0000000..57afff5
+--- /dev/null
++++ b/src/engine/index.ts
+@@ -0,0 +1,3 @@
++export type { Color, PieceType, Piece, Square, Move, GameStatus } from "./types.ts";
++export { Game, START_FEN, isValidFen } from "./game.ts";
++export { perft } from "./perft.ts";
+diff --git a/src/engine/movegen.ts b/src/engine/movegen.ts
+new file mode 100644
+index 0000000..8d4e0d5
+--- /dev/null
++++ b/src/engine/movegen.ts
+@@ -0,0 +1,233 @@
++import type { Color } from "./types.ts";
++import type { Position } from "./board.ts";
++
++/** Internal move. Pieces are board chars; promo is a lowercase type or "". */
++export interface IMove {
++  from: number;
++  to: number;
++  piece: string;
++  cap: string;
++  promo: string;
++  ep: boolean;
++  castle: "" | "k" | "q";
++  dbl: boolean;
++}
++
++export interface Undo {
++  castling: number;
++  ep: number;
++  half: number;
++  full: number;
++}
++
++const KNIGHT = [[-2, -1], [-2, 1], [-1, -2], [-1, 2], [1, -2], [1, 2], [2, -1], [2, 1]];
++const KING = [[-1, -1], [-1, 0], [-1, 1], [0, -1], [0, 1], [1, -1], [1, 0], [1, 1]];
++const DIAG = [[-1, -1], [-1, 1], [1, -1], [1, 1]];
++const ORTH = [[-1, 0], [1, 0], [0, -1], [0, 1]];
++
++export function isAttacked(pos: Position, idx: number, by: Color): boolean {
++  const sq = pos.sq;
++  const r = idx >> 3;
++  const f = idx & 7;
++  const white = by === "w";
++  // white pawns attack toward row 0, so an attacking white pawn sits at row+1
++  const pr = white ? r + 1 : r - 1;
++  if (pr >= 0 && pr < 8) {
++    const pp = white ? "P" : "p";
++    if (f > 0 && sq[pr * 8 + f - 1] === pp) return true;
++    if (f < 7 && sq[pr * 8 + f + 1] === pp) return true;
++  }
++  const n = white ? "N" : "n";
++  for (const [dr, df] of KNIGHT) {
++    const rr = r + dr;
++    const ff = f + df;
++    if (rr >= 0 && rr < 8 && ff >= 0 && ff < 8 && sq[rr * 8 + ff] === n) return true;
++  }
++  const k = white ? "K" : "k";
++  for (const [dr, df] of KING) {
++    const rr = r + dr;
++    const ff = f + df;
++    if (rr >= 0 && rr < 8 && ff >= 0 && ff < 8 && sq[rr * 8 + ff] === k) return true;
++  }
++  const q = white ? "Q" : "q";
++  const rk = white ? "R" : "r";
++  const bs = white ? "B" : "b";
++  for (const [dr, df] of DIAG) {
++    let rr = r + dr;
++    let ff = f + df;
++    while (rr >= 0 && rr < 8 && ff >= 0 && ff < 8) {
++      const p = sq[rr * 8 + ff];
++      if (p) {
++        if (p === q || p === bs) return true;
++        break;
++      }
++      rr += dr;
++      ff += df;
++    }
++  }
++  for (const [dr, df] of ORTH) {
++    let rr = r + dr;
++    let ff = f + df;
++    while (rr >= 0 && rr < 8 && ff >= 0 && ff < 8) {
++      const p = sq[rr * 8 + ff];
++      if (p) {
++        if (p === q || p === rk) return true;
++        break;
++      }
++      rr += dr;
++      ff += df;
++    }
++  }
++  return false;
++}
++
++export function findKing(pos: Position, c: Color): number {
++  return pos.sq.indexOf(c === "w" ? "K" : "k");
++}
++
++export function inCheck(pos: Position, c: Color): boolean {
++  return isAttacked(pos, findKing(pos, c), c === "w" ? "b" : "w");
++}
++
++function isOwn(p: string, white: boolean): boolean {
++  return p !== "" && (p === p.toUpperCase()) === white;
++}
++
++export function pseudoMoves(pos: Position): IMove[] {
++  const sq = pos.sq;
++  const white = pos.turn === "w";
++  const enemy: Color = white ? "b" : "w";
++  const out: IMove[] = [];
++  const push = (from: number, to: number, piece: string, extra?: Partial<IMove>) => {
++    out.push({ from, to, piece, cap: sq[to], promo: "", ep: false, castle: "", dbl: false, ...extra });
++  };
++  for (let from = 0; from < 64; from++) {
++    const piece = sq[from];
++    if (!piece || !isOwn(piece, white)) continue;
++    const r = from >> 3;
++    const f = from & 7;
++    const t = piece.toLowerCase();
++    if (t === "p") {
++      const dir = white ? -1 : 1;
++      const startRow = white ? 6 : 1;
++      const lastRow = white ? 0 : 7;
++      const nr = r + dir;
++      const addPawn = (to: number) => {
++        if (nr === lastRow) for (const pr of ["q", "r", "b", "n"]) push(from, to, piece, { promo: pr });
++        else push(from, to, piece);
++      };
++      if (!sq[nr * 8 + f]) {
++        addPawn(nr * 8 + f);
++        if (r === startRow && !sq[(nr + dir) * 8 + f]) push(from, (nr + dir) * 8 + f, piece, { dbl: true });
++      }
++      for (const df of [-1, 1]) {
++        const ff = f + df;
++        if (ff < 0 || ff > 7) continue;
++        const to = nr * 8 + ff;
++        if (sq[to] && !isOwn(sq[to], white)) addPawn(to);
++        else if (!sq[to] && to === pos.ep) push(from, to, piece, { cap: white ? "p" : "P", ep: true });
++      }
++    } else if (t === "n" || t === "k") {
++      for (const [dr, df] of t === "n" ? KNIGHT : KING) {
++        const rr = r + dr;
++        const ff = f + df;
++        if (rr < 0 || rr > 7 || ff < 0 || ff > 7) continue;
++        const to = rr * 8 + ff;
++        if (!isOwn(sq[to], white)) push(from, to, piece);
++      }
++      if (t === "k") {
++        const base = white ? 60 : 4;
++        if (from === base) {
++          const ks = white ? 1 : 4;
++          const qs = white ? 2 : 8;
++          if (
++            pos.castling & ks && !sq[base + 1] && !sq[base + 2] &&
++            !isAttacked(pos, base, enemy) && !isAttacked(pos, base + 1, enemy) && !isAttacked(pos, base + 2, enemy)
++          ) push(from, base + 2, piece, { castle: "k" });
++          if (
++            pos.castling & qs && !sq[base - 1] && !sq[base - 2] && !sq[base - 3] &&
++            !isAttacked(pos, base, enemy) && !isAttacked(pos, base - 1, enemy) && !isAttacked(pos, base - 2, enemy)
++          ) push(from, base - 2, piece, { castle: "q" });
++        }
++      }
++    } else {
++      const dirs = t === "b" ? DIAG : t === "r" ? ORTH : [...DIAG, ...ORTH];
++      for (const [dr, df] of dirs) {
++        let rr = r + dr;
++        let ff = f + df;
++        while (rr >= 0 && rr < 8 && ff >= 0 && ff < 8) {
++          const to = rr * 8 + ff;
++          if (sq[to]) {
++            if (!isOwn(sq[to], white)) push(from, to, piece);
++            break;
++          }
++          push(from, to, piece);
++          rr += dr;
++          ff += df;
++        }
++      }
++    }
++  }
++  return out;
++}
++
++const RIGHTS_MASK: Record<number, number> = { 60: ~3, 4: ~12, 63: ~1, 56: ~2, 7: ~4, 0: ~8 };
++
++export function makeMove(pos: Position, m: IMove): Undo {
++  const undo: Undo = { castling: pos.castling, ep: pos.ep, half: pos.half, full: pos.full };
++  const sq = pos.sq;
++  const white = pos.turn === "w";
++  sq[m.from] = "";
++  sq[m.to] = m.promo ? (white ? m.promo.toUpperCase() : m.promo) : m.piece;
++  if (m.ep) sq[m.to + (white ? 8 : -8)] = "";
++  if (m.castle) {
++    const row = m.from - (m.from & 7);
++    if (m.castle === "k") {
++      sq[row + 5] = sq[row + 7];
++      sq[row + 7] = "";
++    } else {
++      sq[row + 3] = sq[row];
++      sq[row] = "";
++    }
++  }
++  pos.castling &= (RIGHTS_MASK[m.from] ?? -1) & (RIGHTS_MASK[m.to] ?? -1);
++  pos.ep = m.dbl ? (m.from + m.to) >> 1 : -1;
++  pos.half = m.piece.toLowerCase() === "p" || m.cap ? 0 : pos.half + 1;
++  if (!white) pos.full++;
++  pos.turn = white ? "b" : "w";
++  return undo;
++}
++
++export function unmakeMove(pos: Position, m: IMove, u: Undo): void {
++  const sq = pos.sq;
++  pos.turn = pos.turn === "w" ? "b" : "w";
++  const white = pos.turn === "w";
++  sq[m.from] = m.piece;
++  sq[m.to] = m.ep ? "" : m.cap;
++  if (m.ep) sq[m.to + (white ? 8 : -8)] = m.cap;
++  if (m.castle) {
++    const row = m.from - (m.from & 7);
++    if (m.castle === "k") {
++      sq[row + 7] = sq[row + 5];
++      sq[row + 5] = "";
++    } else {
++      sq[row] = sq[row + 3];
++      sq[row + 3] = "";
++    }
++  }
++  pos.castling = u.castling;
++  pos.ep = u.ep;
++  pos.half = u.half;
++  pos.full = u.full;
++}
++
++export function legalMoves(pos: Position): IMove[] {
++  const me = pos.turn;
++  const out: IMove[] = [];
++  for (const m of pseudoMoves(pos)) {
++    const u = makeMove(pos, m);
++    if (!inCheck(pos, me)) out.push(m);
++    unmakeMove(pos, m, u);
++  }
++  return out;
++}
+diff --git a/src/engine/perft.test.ts b/src/engine/perft.test.ts
+new file mode 100644
+index 0000000..1100e86
+--- /dev/null
++++ b/src/engine/perft.test.ts
+@@ -0,0 +1,29 @@
++import { describe, expect, it } from "vitest";
++import { Game, START_FEN, perft } from "./index.ts";
++
++const KIWIPETE = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1";
++const POS3 = "8/2p5/3p4/KP5r/1R3p1k/8/4P1P1/8 w - - 0 1";
++const POS4 = "r3k2r/Pppp1ppp/1b3nbN/nP6/BBP1P3/q4N2/Pp1P2PP/R2Q1RK1 w kq - 0 1";
++const POS5 = "rnbq1k1r/pp1Pbppp/2p5/8/2B5/8/PPP1NnPP/RNBQK2R w KQ - 1 8";
++
++const cases: [string, string, number[]][] = [
++  ["start", START_FEN, [20, 400, 8902, 197281]],
++  ["kiwipete", KIWIPETE, [48, 2039, 97862]],
++  ["position 3", POS3, [14, 191, 2812, 43238]],
++  ["position 4", POS4, [6, 264, 9467]],
++  ["position 5", POS5, [44, 1486, 62379]],
++];
++
++describe("perft", () => {
++  for (const [name, fen, counts] of cases) {
++    counts.forEach((expected, i) => {
++      it(`${name} depth ${i + 1} = ${expected}`, () => {
++        expect(perft(new Game(fen), i + 1)).toBe(expected);
++      }, 30000);
++    });
++  }
++
++  it("depth 0 is 1", () => {
++    expect(perft(new Game(), 0)).toBe(1);
++  });
++});
+diff --git a/src/engine/perft.ts b/src/engine/perft.ts
+new file mode 100644
+index 0000000..354d038
+--- /dev/null
++++ b/src/engine/perft.ts
+@@ -0,0 +1,21 @@
++import { parseFen } from "./board.ts";
++import type { Position } from "./board.ts";
++import { legalMoves, makeMove, unmakeMove } from "./movegen.ts";
++import type { Game } from "./game.ts";
++
++function count(pos: Position, depth: number): number {
++  const moves = legalMoves(pos);
++  if (depth <= 1) return moves.length;
++  let n = 0;
++  for (const m of moves) {
++    const u = makeMove(pos, m);
++    n += count(pos, depth - 1);
++    unmakeMove(pos, m, u);
++  }
++  return n;
++}
++
++export function perft(game: Game, depth: number): number {
++  if (depth <= 0) return 1;
++  return count(parseFen(game.fen()), depth);
++}
+diff --git a/src/engine/puzzles.test.ts b/src/engine/puzzles.test.ts
+new file mode 100644
+index 0000000..a5cbae9
+--- /dev/null
++++ b/src/engine/puzzles.test.ts
+@@ -0,0 +1,25 @@
++import { describe, expect, it } from "vitest";
++import puzzles from "../../public/puzzles.json";
++import { Game } from "./index.ts";
++
++interface Puzzle {
++  id: number;
++  fen: string;
++  solution: string[];
++}
++
++describe("public/puzzles.json", () => {
++  it("has 12 puzzles", () => {
++    expect(puzzles).toHaveLength(12);
++  });
++
++  for (const p of puzzles as Puzzle[]) {
++    it(`puzzle ${p.id}: solution is legal and ends in checkmate`, () => {
++      const g = new Game(p.fen);
++      for (const uci of p.solution) {
++        expect(g.moveUci(uci), `${uci} legal in ${g.fen()}`).not.toBeNull();
++      }
++      expect(g.status().state).toBe("checkmate");
++    });
++  }
++});
+diff --git a/src/engine/rules.test.ts b/src/engine/rules.test.ts
+new file mode 100644
+index 0000000..f9a2f35
+--- /dev/null
++++ b/src/engine/rules.test.ts
+@@ -0,0 +1,337 @@
++import { describe, expect, it } from "vitest";
++import { Game, START_FEN, isValidFen } from "./index.ts";
++
++function play(g: Game, ...ucis: string[]): void {
++  for (const u of ucis) {
++    if (!g.moveUci(u)) throw new Error(`illegal test move ${u} in ${g.fen()}`);
++  }
++}
++
++function targets(g: Game, from: string): string[] {
++  return g.legalMoves(from).map((m) => m.to).sort();
++}
++
++describe("basics", () => {
++  it("start position", () => {
++    const g = new Game();
++    expect(g.fen()).toBe(START_FEN);
++    expect(g.turn()).toBe("w");
++    expect(g.legalMoves()).toHaveLength(20);
++    expect(g.get("e1")).toEqual({ color: "w", type: "k" });
++    expect(g.board()[0][0]).toEqual({ color: "b", type: "r" });
++    expect(g.board()[7][4]).toEqual({ color: "w", type: "k" });
++    expect(g.kingSquare("b")).toBe("e8");
++    expect(g.status()).toEqual({ state: "playing", check: false });
++  });
++
++  it("rejects illegal moves", () => {
++    const g = new Game();
++    expect(g.move({ from: "e2", to: "e5" })).toBeNull();
++    expect(g.move({ from: "e7", to: "e5" })).toBeNull(); // wrong side
++    expect(g.move({ from: "e3", to: "e4" })).toBeNull(); // empty square
++    expect(g.move({ from: "z9", to: "e4" })).toBeNull();
++    expect(g.moveUci("garbage")).toBeNull();
++    expect(g.fen()).toBe(START_FEN);
++  });
++
++  it("pinned piece cannot move; king cannot step into check", () => {
++    const g = new Game("4k3/4r3/8/8/8/8/4N3/4K3 w - - 0 1");
++    expect(g.legalMoves("e2")).toHaveLength(0);
++    const h = new Game("4k3/8/8/8/8/8/r7/4K3 w - - 0 1");
++    expect(targets(h, "e1")).toEqual(["d1", "e2", "f1", "f2"].filter((s) => s[1] !== "2"));
++  });
++
++  it("must resolve check", () => {
++    const g = new Game("4k3/8/8/8/8/8/4r3/R3K3 w - - 0 1");
++    // Ke1 is attacked by Re2: capture it with the king or the rook cannot help
++    expect(g.inCheck()).toBe(true);
++    expect(g.legalMoves().every((m) => m.piece === "k")).toBe(true);
++    expect(g.move({ from: "a1", to: "a2" })).toBeNull();
++  });
++
++  it("undo restores the position and history", () => {
++    const g = new Game();
++    play(g, "e2e4", "e7e5", "g1f3");
++    expect(g.history().map((m) => m.san)).toEqual(["e4", "e5", "Nf3"]);
++    expect(g.lastMove()?.to).toBe("f3");
++    g.undo();
++    g.undo();
++    g.undo();
++    expect(g.fen()).toBe(START_FEN);
++    expect(g.undo()).toBeNull();
++    expect(g.lastMove()).toBeNull();
++  });
++
++  it("validates FEN", () => {
++    expect(isValidFen(START_FEN)).toBe(true);
++    expect(isValidFen("nonsense")).toBe(false);
++    expect(isValidFen("8/8/8/8/8/8/8/8 w - - 0 1")).toBe(false);
++    expect(isValidFen("4k3/8/8/8/8/8/8/4K2 w - - 0 1")).toBe(false);
++    expect(isValidFen("4k3/8/8/8/8/8/8/4K3 x - - 0 1")).toBe(false);
++    expect(isValidFen("P3k3/8/8/8/8/8/8/4K3 w - - 0 1")).toBe(false);
++    expect(isValidFen("4k3/8/8/8/8/8/4R3/4K3 w - - 0 1")).toBe(false); // side to move can capture king
++    expect(() => new Game("bad")).toThrow(Error);
++  });
++
++  it("fen round-trips", () => {
++    const g = new Game();
++    play(g, "e2e4");
++    expect(g.fen()).toBe("rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq e3 0 1");
++  });
++});
++
++describe("castling", () => {
++  const base = "r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1";
++
++  it("works on both sides for white and black", () => {
++    const g = new Game(base);
++    const k = g.move({ from: "e1", to: "g1" });
++    expect(k?.flags.castle).toBe("k");
++    expect(k?.san).toBe("O-O");
++    expect(g.get("g1")?.type).toBe("k");
++    expect(g.get("f1")?.type).toBe("r");
++    expect(g.get("h1")).toBeNull();
++    const q = g.move({ from: "e8", to: "c8" });
++    expect(q?.flags.castle).toBe("q");
++    expect(q?.san).toBe("O-O-O");
++    expect(g.get("c8")?.type).toBe("k");
++    expect(g.get("d8")?.type).toBe("r");
++    expect(g.get("a8")).toBeNull();
++    g.undo();
++    g.undo();
++    expect(g.fen()).toBe(base);
++    const h = new Game(base);
++    expect(h.move({ from: "e1", to: "c1" })?.flags.castle).toBe("q");
++    expect(h.get("d1")?.type).toBe("r");
++    expect(h.move({ from: "e8", to: "g8" })?.flags.castle).toBe("k");
++    expect(h.get("f8")?.type).toBe("r");
++  });
++
++  it("is refused without the castling right", () => {
++    const g = new Game("r3k2r/8/8/8/8/8/8/R3K2R w Kkq - 0 1");
++    expect(targets(g, "e1")).toContain("g1");
++    expect(targets(g, "e1")).not.toContain("c1");
++  });
++
++  it("is refused after the rook moved and came back", () => {
++    const g = new Game(base);
++    play(g, "h1h2", "a8a7", "h2h1", "a7a8");
++    expect(targets(g, "e1")).not.toContain("g1");
++    expect(targets(g, "e1")).toContain("c1");
++  });
++
++  it("is refused after the king moved and came back", () => {
++    const g = new Game(base);
++    play(g, "e1e2", "a8a7", "e2e1", "a7a8");
++    expect(targets(g, "e1")).not.toContain("g1");
++    expect(targets(g, "e1")).not.toContain("c1");
++  });
++
++  it("is refused after the rook was captured", () => {
++    const g = new Game("r3k2r/8/8/8/8/8/6b1/R3K2R b KQkq - 0 1");
++    play(g, "g2h1");
++    expect(targets(g, "e1")).not.toContain("g1");
++  });
++
++  it("is refused when squares between are occupied", () => {
++    const g = new Game("r3k2r/8/8/8/8/8/8/RN2K2R w KQkq - 0 1");
++    expect(targets(g, "e1")).toContain("g1");
++    expect(targets(g, "e1")).not.toContain("c1");
++    const h = new Game("r3k2r/8/8/8/8/8/8/R3KB1R w KQkq - 0 1");
++    expect(targets(h, "e1")).not.toContain("g1");
++    expect(targets(h, "e1")).toContain("c1");
++  });
++
++  it("is refused while in check", () => {
++    const g = new Game("r3k2r/8/8/8/4r3/8/8/R3K2R w KQkq - 0 1");
++    expect(g.inCheck()).toBe(true);
++    expect(targets(g, "e1")).not.toContain("g1");
++    expect(targets(g, "e1")).not.toContain("c1");
++  });
++
++  it("is refused through an attacked square", () => {
++    const k = new Game("4kr2/8/8/8/8/8/8/R3K2R w KQ - 0 1");
++    expect(targets(k, "e1")).not.toContain("g1");
++    expect(targets(k, "e1")).toContain("c1");
++    const q = new Game("3rk3/8/8/8/8/8/8/R3K2R w KQ - 0 1");
++    expect(targets(q, "e1")).toContain("g1");
++    expect(targets(q, "e1")).not.toContain("c1");
++  });
++
++  it("is refused into check", () => {
++    const k = new Game("4k1r1/8/8/8/8/8/8/R3K2R w KQ - 0 1");
++    expect(targets(k, "e1")).not.toContain("g1");
++    const q = new Game("2r1k3/8/8/8/8/8/8/R3K2R w KQ - 0 1");
++    expect(targets(q, "e1")).not.toContain("c1");
++  });
++
++  it("is allowed when only the rook's neighbour b1 is attacked", () => {
++    const g = new Game("1r2k3/8/8/8/8/8/8/R3K2R w KQ - 0 1");
++    expect(targets(g, "e1")).toContain("c1");
++  });
++});
++
++describe("en passant", () => {
++  it("white captures en passant right after the double step", () => {
++    const g = new Game("4k3/3p4/8/4P3/8/8/8/4K3 b - - 0 1");
++    const dp = g.move({ from: "d7", to: "d5" });
++    expect(dp?.flags.doublePush).toBe(true);
++    const ep = g.legalMoves("e5").find((m) => m.to === "d6");
++    expect(ep?.flags.enPassant).toBe(true);
++    expect(ep?.captured).toBe("p");
++    g.move({ from: "e5", to: "d6" });
++    expect(g.get("d5")).toBeNull();
++    expect(g.get("d6")).toEqual({ color: "w", type: "p" });
++    g.undo();
++    expect(g.get("d5")).toEqual({ color: "b", type: "p" });
++    expect(g.get("d6")).toBeNull();
++  });
++
++  it("black captures en passant", () => {
++    const g = new Game("4k3/8/8/8/3p4/8/4P3/4K3 w - - 0 1");
++    play(g, "e2e4");
++    expect(g.fen()).toContain(" e3 ");
++    const m = g.move({ from: "d4", to: "e3" });
++    expect(m?.flags.enPassant).toBe(true);
++    expect(g.get("e4")).toBeNull();
++  });
++
++  it("expires if not taken immediately", () => {
++    const g = new Game("4k3/8/8/8/3p4/8/4P3/4K3 w - - 0 1");
++    play(g, "e2e4", "e8e7", "e1d1", "e7e8", "d1e1");
++    expect(g.move({ from: "d4", to: "e3" })).toBeNull();
++    expect(g.legalMoves("d4").map((m) => m.to)).toEqual(["d3"]);
++  });
++
++  it("is not available for a single step or without a pawn beside", () => {
++    const g = new Game("4k3/8/8/8/3p4/4P3/8/4K3 w - - 0 1");
++    play(g, "e3e4");
++    expect(g.move({ from: "d4", to: "e3" })).toBeNull();
++  });
++
++  it("is illegal when it exposes the king", () => {
++    // white king a5, pawn b5, black pawn c7->c5, black rook h5: b5xc6 would expose the king on rank 5
++    const g = new Game("4k3/2p5/8/KP5r/8/8/8/8 b - - 0 1");
++    play(g, "c7c5");
++    expect(g.legalMoves("b5").map((m) => m.to)).toEqual(["b6"]);
++  });
++});
++
++describe("promotion", () => {
++  it("lists one move per promotion piece", () => {
++    const g = new Game("7k/P7/8/8/8/8/8/K7 w - - 0 1");
++    const ms = g.legalMoves("a7");
++    expect(ms.map((m) => m.promotion).sort()).toEqual(["b", "n", "q", "r"]);
++    expect(ms.every((m) => m.to === "a8")).toBe(true);
++  });
++
++  it("requires a promotion piece", () => {
++    const g = new Game("7k/P7/8/8/8/8/8/K7 w - - 0 1");
++    expect(g.move({ from: "a7", to: "a8" })).toBeNull();
++    expect(g.move({ from: "a7", to: "a8", promotion: "q" })).not.toBeNull();
++  });
++
++  for (const p of ["q", "r", "b", "n"] as const) {
++    it(`promotes to ${p}`, () => {
++      const g = new Game("7k/P7/8/8/8/8/8/K7 w - - 0 1");
++      const m = g.move({ from: "a7", to: "a8", promotion: p });
++      expect(m?.promotion).toBe(p);
++      expect(g.get("a8")).toEqual({ color: "w", type: p });
++      expect(g.get("a7")).toBeNull();
++      g.undo();
++      expect(g.get("a7")).toEqual({ color: "w", type: "p" });
++      expect(g.get("a8")).toBeNull();
++    });
++  }
++
++  it("promotes by capture and for black", () => {
++    const g = new Game("1n2k3/P7/8/8/8/8/p7/1N2K3 w - - 0 1");
++    expect(g.legalMoves("a7").filter((m) => m.to === "b8")).toHaveLength(4);
++    const m = g.moveUci("a7b8n");
++    expect(m?.captured).toBe("n");
++    expect(m?.san).toBe("axb8=N");
++    const b = g.moveUci("a2a1r");
++    expect(g.get("a1")).toEqual({ color: "b", type: "r" });
++    expect(b?.promotion).toBe("r");
++  });
++
++  it("rejects invalid promotion on non-promoting moves", () => {
++    const g = new Game();
++    expect(g.move({ from: "e2", to: "e4", promotion: "q" })).toBeNull();
++  });
++});
++
++describe("check, checkmate, stalemate", () => {
++  it("detects check", () => {
++    const g = new Game("4k3/8/8/8/8/8/4R3/4K3 b - - 0 1");
++    expect(g.inCheck()).toBe(true);
++    expect(g.status()).toEqual({ state: "playing", check: true });
++    expect(g.isGameOver()).toBe(false);
++    const san = new Game();
++    play(san, "e2e4", "f7f5");
++    expect(san.move({ from: "d1", to: "h5" })?.san).toBe("Qh5+");
++  });
++
++  it("detects checkmate (fool's mate)", () => {
++    const g = new Game();
++    play(g, "f2f3", "e7e5", "g2g4");
++    const m = g.moveUci("d8h4");
++    expect(m?.san).toBe("Qh4#");
++    expect(g.status()).toEqual({ state: "checkmate", winner: "b" });
++    expect(g.isGameOver()).toBe(true);
++    expect(g.legalMoves()).toHaveLength(0);
++    g.undo();
++    expect(g.isGameOver()).toBe(false);
++  });
++
++  it("detects stalemate", () => {
++    const g = new Game("7k/5Q2/6K1/8/8/8/8/8 b - - 0 1");
++    expect(g.inCheck()).toBe(false);
++    expect(g.status()).toEqual({ state: "stalemate" });
++    expect(g.isGameOver()).toBe(true);
++  });
++});
++
++describe("draws", () => {
++  it("threefold repetition ends the game", () => {
++    const g = new Game();
++    const cycle = ["g1f3", "g8f6", "f3g1", "f6g8"];
++    play(g, ...cycle);
++    expect(g.status().state).toBe("playing");
++    play(g, ...cycle.slice(0, 3));
++    expect(g.status().state).toBe("playing");
++    play(g, cycle[3]);
++    expect(g.status()).toEqual({ state: "draw", reason: "threefold" });
++    expect(g.isGameOver()).toBe(true);
++    g.undo();
++    expect(g.status().state).toBe("playing");
++  });
++
++  it("repetition does not count positions with different castling rights", () => {
++    const g = new Game("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1");
++    play(g, "h1h2", "h8h7", "h2h1", "h7h8", "h1h2", "h8h7", "h2h1", "h7h8");
++    expect(g.status()).toEqual({ state: "playing", check: false });
++  });
++
++  it("fifty-move rule at halfmove clock 100", () => {
++    const g = new Game("4k3/8/8/8/8/8/8/R3K3 w - - 99 80");
++    expect(g.status().state).toBe("playing");
++    g.moveUci("a1a2");
++    expect(g.status()).toEqual({ state: "draw", reason: "fifty-move" });
++    expect(g.isGameOver()).toBe(true);
++    expect(new Game("4k3/8/8/8/8/8/8/R3K3 w - - 100 80").status()).toEqual({ state: "draw", reason: "fifty-move" });
++  });
++
++  it("pawn moves and captures reset the clock", () => {
++    const g = new Game("4k3/p7/8/8/8/8/P7/R3K3 w - - 99 80");
++    g.moveUci("a2a3");
++    expect(g.status().state).toBe("playing");
++    expect(g.fen()).toContain(" 0 80");
++  });
++
++  it("checkmate takes priority over the fifty-move rule", () => {
++    const g = new Game("6k1/5ppp/8/8/8/8/8/R3K3 w - - 99 80");
++    g.moveUci("a1a8");
++    expect(g.status()).toEqual({ state: "checkmate", winner: "w" });
++  });
++});
+diff --git a/src/engine/types.ts b/src/engine/types.ts
+new file mode 100644
+index 0000000..d729655
+--- /dev/null
++++ b/src/engine/types.ts
+@@ -0,0 +1,23 @@
++export type Color = "w" | "b";
++export type PieceType = "p" | "n" | "b" | "r" | "q" | "k";
++export interface Piece {
++  color: Color;
++  type: PieceType;
++}
++export type Square = string; // "a1".."h8"
++
++export interface Move {
++  from: Square;
++  to: Square;
++  piece: PieceType;
++  captured?: PieceType;
++  promotion?: "q" | "r" | "b" | "n";
++  flags: { enPassant?: boolean; castle?: "k" | "q"; doublePush?: boolean };
++  san?: string; // filled by Game.move
++}
++
++export type GameStatus =
++  | { state: "playing"; check: boolean }
++  | { state: "checkmate"; winner: Color }
++  | { state: "stalemate" }
++  | { state: "draw"; reason: "threefold" | "fifty-move" };
+diff --git a/src/main.ts b/src/main.ts
+index 67aeb67..64bd415 100644
+--- a/src/main.ts
++++ b/src/main.ts
+@@ -1,2 +1,5 @@
+-// Entry point. The app is built here.
+-export {};
++import "./styles.css";
++import { App } from "./ui/app.ts";
++
++const root = document.getElementById("app");
++if (root) void new App(root).start();
+diff --git a/src/styles.css b/src/styles.css
+new file mode 100644
+index 0000000..fb0af69
+--- /dev/null
++++ b/src/styles.css
+@@ -0,0 +1,306 @@
++:root {
++  color-scheme: light dark;
++  --bg: #f4f1ea;
++  --bg-2: #ebe6da;
++  --card: #fffdf8;
++  --text: #22252b;
++  --muted: #6c6f76;
++  --line: #ddd6c7;
++  --accent: #c9861c;
++  --accent-ink: #ffffff;
++  --sq-light: #ece7da;
++  --sq-dark: #8c9c7c;
++  --coord-on-light: #6f7f60;
++  --coord-on-dark: #f0ece2;
++  --hl-last: rgba(233, 178, 52, 0.42);
++  --hl-sel: rgba(233, 160, 30, 0.7);
++  --dot: rgba(30, 34, 40, 0.28);
++  --wrong: rgba(214, 64, 52, 0.55);
++  --good: #2f8a4c;
++  --bad: #c0392b;
++  --shadow: 0 10px 30px rgba(60, 50, 30, 0.16), 0 2px 6px rgba(60, 50, 30, 0.1);
++  --pw-fill: #fbfaf6;
++  --pw-stroke: #2a2a2a;
++  --pb-fill: #2c2f36;
++  --pb-stroke: #0e0f12;
++  --pb-detail: #9aa0aa;
++  --radius: 14px;
++  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
++}
++
++@media (prefers-color-scheme: dark) {
++  :root {
++    --bg: #14171c;
++    --bg-2: #1b1f26;
++    --card: #1e232b;
++    --text: #e8e6e1;
++    --muted: #979ca6;
++    --line: #2e3440;
++    --accent: #e2a640;
++    --accent-ink: #1a1408;
++    --sq-light: #97a1b0;
++    --sq-dark: #5f6979;
++    --coord-on-light: #4a5260;
++    --coord-on-dark: #c9cfd8;
++    --hl-last: rgba(226, 166, 64, 0.38);
++    --hl-sel: rgba(226, 166, 64, 0.66);
++    --dot: rgba(10, 12, 16, 0.45);
++    --shadow: 0 12px 34px rgba(0, 0, 0, 0.5), 0 2px 6px rgba(0, 0, 0, 0.4);
++    --pb-fill: #23262d;
++    --pb-stroke: #07080a;
++    --pb-detail: #8a919c;
++    --pw-stroke: #15171b;
++  }
++}
++
++* { box-sizing: border-box; }
++html, body { margin: 0; }
++body {
++  background: radial-gradient(1200px 600px at 20% -10%, var(--bg-2), var(--bg));
++  color: var(--text);
++  min-height: 100vh;
++  overflow-x: hidden;
++}
++button { font: inherit; color: inherit; }
++
++.top {
++  display: flex;
++  align-items: center;
++  justify-content: space-between;
++  gap: 12px;
++  max-width: 1040px;
++  margin: 0 auto;
++  padding: 14px 12px 10px;
++}
++.brand {
++  display: flex;
++  align-items: center;
++  gap: 8px;
++  margin: 0;
++  font-size: 1.35rem;
++  letter-spacing: 0.01em;
++}
++.brand-mark { width: 30px; height: 30px; display: inline-flex; }
++.brand-mark svg { width: 100%; height: 100%; }
++.tabs {
++  display: flex;
++  background: var(--card);
++  border: 1px solid var(--line);
++  border-radius: 999px;
++  padding: 3px;
++}
++.tabs button {
++  border: 0;
++  background: transparent;
++  padding: 7px 16px;
++  border-radius: 999px;
++  cursor: pointer;
++  font-weight: 600;
++  color: var(--muted);
++}
++.tabs button.on { background: var(--accent); color: var(--accent-ink); }
++
++.layout {
++  max-width: 1040px;
++  margin: 0 auto;
++  padding: 0 12px 24px;
++  display: flex;
++  flex-direction: column;
++  gap: 14px;
++}
++.board-col { display: flex; justify-content: center; }
++.board-frame {
++  --size: min(calc(100vw - 24px), 560px);
++  position: relative;
++  width: var(--size);
++  height: var(--size);
++  border-radius: 10px;
++  box-shadow: var(--shadow);
++}
++
++.board {
++  display: grid;
++  grid-template-columns: repeat(8, 1fr);
++  grid-template-rows: repeat(8, 1fr);
++  width: 100%;
++  height: 100%;
++  border-radius: 10px;
++  overflow: hidden;
++  touch-action: none;
++  user-select: none;
++  -webkit-user-select: none;
++  -webkit-touch-callout: none;
++}
++.sq { position: relative; display: flex; align-items: center; justify-content: center; }
++.sq.light { background: var(--sq-light); }
++.sq.dark { background: var(--sq-dark); }
++.sq.last::before, .sq.selected::before, .sq.wrong::before {
++  content: "";
++  position: absolute;
++  inset: 0;
++  background: var(--hl-last);
++}
++.sq.selected::before { background: var(--hl-sel); }
++.sq.wrong::before { background: var(--wrong); }
++.sq.check {
++  background-image: radial-gradient(circle, rgba(235, 50, 40, 0.95) 0%, rgba(235, 50, 40, 0.55) 40%, rgba(235, 50, 40, 0) 72%);
++}
++.sq.target::after {
++  content: "";
++  position: absolute;
++  width: 30%;
++  height: 30%;
++  border-radius: 50%;
++  background: var(--dot);
++  pointer-events: none;
++}
++.sq.target-capture::after {
++  content: "";
++  position: absolute;
++  inset: 4%;
++  border-radius: 50%;
++  border: 5px solid var(--dot);
++  pointer-events: none;
++}
++.coord {
++  position: absolute;
++  font-size: clamp(9px, 1.8vw, 12px);
++  font-weight: 700;
++  pointer-events: none;
++  z-index: 1;
++}
++.coord.rank { top: 3px; left: 4px; }
++.coord.file { bottom: 2px; right: 4px; }
++.sq.light .coord { color: var(--coord-on-light); }
++.sq.dark .coord { color: var(--coord-on-dark); }
++
++.piece {
++  position: relative;
++  z-index: 2;
++  width: 88%;
++  height: 88%;
++  cursor: grab;
++}
++.piece.dragging { opacity: 0.3; }
++.piece-svg { width: 100%; height: 100%; display: block; filter: drop-shadow(0 2px 1.5px rgba(0, 0, 0, 0.25)); }
++.pw g { fill: var(--pw-fill); stroke: var(--pw-stroke); }
++.pb g { fill: var(--pb-fill); stroke: var(--pb-stroke); }
++.pb .d { stroke: var(--pb-detail); }
++.pw .e { fill: var(--pw-stroke); stroke: none; }
++.pb .e { fill: var(--pb-detail); stroke: none; }
++.drag-ghost {
++  position: fixed;
++  left: 0;
++  top: 0;
++  z-index: 100;
++  pointer-events: none;
++}
++.drag-ghost svg { width: 100%; height: 100%; filter: drop-shadow(0 8px 8px rgba(0, 0, 0, 0.3)); }
++
++#overlay { position: absolute; inset: 0; pointer-events: none; z-index: 20; }
++#overlay > * { pointer-events: auto; }
++.scrim { position: absolute; inset: 0; background: rgba(10, 12, 16, 0.35); border-radius: 10px; }
++.promo, .over {
++  position: absolute;
++  left: 50%;
++  top: 50%;
++  transform: translate(-50%, -50%);
++  background: var(--card);
++  border: 1px solid var(--line);
++  border-radius: var(--radius);
++  box-shadow: var(--shadow);
++  padding: 14px 16px;
++  text-align: center;
++}
++.promo p { margin: 0 0 8px; font-weight: 600; }
++.promo-row { display: flex; gap: 8px; }
++.promo-btn {
++  width: clamp(54px, 15vw, 72px);
++  height: clamp(54px, 15vw, 72px);
++  border-radius: 10px;
++  border: 1px solid var(--line);
++  background: var(--sq-light);
++  cursor: pointer;
++  padding: 4px;
++}
++.promo-btn:hover, .promo-btn:focus-visible { outline: 3px solid var(--accent); }
++.promo-btn svg { width: 100%; height: 100%; }
++.over { min-width: min(280px, 80%); padding: 20px 22px; }
++.over h2 { margin: 2px 0 4px; font-size: 1.7rem; }
++.over p { margin: 0 0 14px; color: var(--muted); }
++.over .over-kicker { margin: 0; text-transform: uppercase; font-size: 0.75rem; letter-spacing: 0.12em; color: var(--accent); font-weight: 700; }
++.over .btns { justify-content: center; }
++
++.panel { display: flex; flex-direction: column; gap: 12px; }
++.card {
++  background: var(--card);
++  border: 1px solid var(--line);
++  border-radius: var(--radius);
++  padding: 14px 16px;
++}
++.card h2 { margin: 0 0 6px; font-size: 1.1rem; }
++.card h3 { margin: 0 0 8px; font-size: 0.85rem; text-transform: uppercase; letter-spacing: 0.08em; color: var(--muted); }
++.status { margin: 0 0 12px; display: flex; align-items: center; gap: 8px; font-weight: 500; }
++.dot { width: 12px; height: 12px; border-radius: 50%; border: 1.5px solid var(--text); display: inline-block; flex: none; }
++.dot.w { background: #fbfaf6; }
++.dot.b { background: #2c2f36; }
++.dot.ended { background: var(--accent); border-color: var(--accent); }
++.check-tag { color: var(--bad); }
++.muted { color: var(--muted); font-weight: 400; }
++.notice { margin: 0 0 10px; padding: 8px 10px; border-radius: 8px; background: var(--bg-2); font-size: 0.9rem; }
++.btns { display: flex; gap: 8px; flex-wrap: wrap; }
++.btn {
++  border: 1px solid var(--line);
++  background: var(--bg-2);
++  padding: 8px 14px;
++  border-radius: 10px;
++  cursor: pointer;
++  font-weight: 600;
++}
++.btn:hover:not(:disabled) { border-color: var(--accent); }
++.btn:disabled { opacity: 0.45; cursor: default; }
++.btn.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
++
++.moves { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 2px 12px; max-height: 260px; overflow-y: auto; font-variant-numeric: tabular-nums; }
++.moves li { display: grid; grid-template-columns: 2.2em 1fr 1fr; gap: 4px; font-size: 0.92rem; padding: 2px 0; }
++.moves .num { color: var(--muted); }
++
++.ptitle { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
++.badge { background: var(--bg-2); border: 1px solid var(--line); border-radius: 999px; padding: 3px 10px; font-size: 0.8rem; font-weight: 700; color: var(--accent); }
++.hint { margin: 0 0 12px; color: var(--muted); }
++.wrong-msg { margin: 0 0 12px; color: var(--bad); font-weight: 600; }
++.good-msg { margin: 0 0 12px; color: var(--good); font-weight: 600; }
++.solved {
++  display: flex;
++  flex-wrap: wrap;
++  align-items: center;
++  gap: 6px 10px;
++  margin: 0 0 12px;
++  padding: 12px;
++  border-radius: 10px;
++  background: color-mix(in srgb, var(--good) 16%, var(--card));
++  border: 1px solid color-mix(in srgb, var(--good) 50%, var(--card));
++}
++.solved strong { color: var(--good); font-size: 1.1rem; }
++.solved .btn { margin-left: auto; }
++.pdots { display: grid; grid-template-columns: repeat(6, 1fr); gap: 6px; }
++.pdot {
++  aspect-ratio: 1;
++  border-radius: 8px;
++  border: 1px solid var(--line);
++  background: var(--bg-2);
++  cursor: pointer;
++  font-weight: 600;
++}
++.pdot.on { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
++
++@media (min-width: 900px) {
++  .top { padding: 22px 24px 16px; }
++  .layout { flex-direction: row; align-items: flex-start; justify-content: center; gap: 28px; padding: 0 24px 32px; }
++  .board-frame { --size: min(calc(100vh - 120px), 640px); }
++  .panel { width: 320px; flex: none; }
++  .moves { max-height: 340px; }
++}
++@media (min-width: 900px) and (max-height: 520px) {
++  .board-frame { --size: 400px; }
++}
+diff --git a/src/ui/app.ts b/src/ui/app.ts
+new file mode 100644
+index 0000000..999ebbf
+--- /dev/null
++++ b/src/ui/app.ts
+@@ -0,0 +1,417 @@
++import { Game, START_FEN, isValidFen } from "../engine/index.ts";
++import type { Color, GameStatus, Move, Square } from "../engine/index.ts";
++import { BoardView } from "./board-view.ts";
++import { pieceSvg } from "./pieces.ts";
++
++interface Puzzle {
++  id: number;
++  type: "mate-in-1" | "mate-in-2";
++  fen: string;
++  solution: string[];
++}
++
++type Promo = "q" | "r" | "b" | "n";
++const NAME: Record<Color, string> = { w: "White", b: "Black" };
++
++const $ = <T extends HTMLElement = HTMLElement>(root: ParentNode, sel: string) =>
++  root.querySelector(sel) as T;
++
++export class App {
++  private root: HTMLElement;
++  private mode: "play" | "puzzle" = "play";
++  private game = new Game();
++  private board!: BoardView;
++  private puzzles: Puzzle[] = [];
++  private pIndex = 0;
++  private pStep = 0;
++  private pSolved = false;
++  private pFeedback: "" | "wrong" | "good" = "";
++  private busy = false; // waiting for an automatic reply
++  private notice = "";
++  private gameOverDismissed = false;
++  private startFen = START_FEN;
++  private timers: number[] = [];
++
++  constructor(root: HTMLElement) {
++    this.root = root;
++  }
++
++  async start(): Promise<void> {
++    this.root.innerHTML = `
++      <header class="top">
++        <h1 class="brand"><span class="brand-mark">${pieceSvg("w", "n")}</span>Gambit</h1>
++        <nav class="tabs" role="tablist">
++          <button role="tab" data-tab="play">Play</button>
++          <button role="tab" data-tab="puzzle">Puzzles</button>
++        </nav>
++      </header>
++      <main class="layout">
++        <section class="board-col">
++          <div class="board-frame">
++            <div id="board" aria-label="Chess board"></div>
++            <div id="overlay"></div>
++          </div>
++        </section>
++        <aside class="panel" id="panel"></aside>
++      </main>`;
++    this.board = new BoardView($(this.root, "#board"), this.game, {
++      canMove: () => this.userSide(),
++      onMove: (from, to) => this.userMove(from, to),
++    });
++    this.root.querySelectorAll<HTMLElement>("[data-tab]").forEach((b) =>
++      b.addEventListener("click", () => {
++        if (b.dataset.tab === "play") this.newGame(START_FEN, true);
++        else this.openPuzzle(this.mode === "puzzle" ? this.pIndex : 0, true);
++      }),
++    );
++    this.root.addEventListener("click", (e) => this.onClick(e));
++    try {
++      const res = await fetch(`${import.meta.env.BASE_URL}puzzles.json`);
++      this.puzzles = (await res.json()) as Puzzle[];
++    } catch {
++      this.puzzles = [];
++    }
++    const params = new URLSearchParams(location.search);
++    const pz = params.get("puzzle");
++    const fen = params.get("fen");
++    if (pz !== null) {
++      const n = Number.parseInt(pz, 10);
++      if (n >= 1 && n <= this.puzzles.length) this.openPuzzle(n - 1, false);
++      else {
++        this.notice = `There is no puzzle ${pz}. Showing puzzle 1.`;
++        this.openPuzzle(0, false);
++      }
++    } else if (fen !== null) {
++      if (isValidFen(fen)) this.newGame(fen, false);
++      else {
++        this.notice = "That FEN could not be read. Starting a normal game.";
++        this.newGame(START_FEN, false);
++      }
++    } else this.newGame(START_FEN, false);
++  }
++
++  private clearTimers(): void {
++    this.timers.forEach((t) => clearTimeout(t));
++    this.timers = [];
++  }
++
++  private later(ms: number, fn: () => void): void {
++    this.timers.push(window.setTimeout(fn, ms));
++  }
++
++  private setUrl(q: string): void {
++    history.replaceState(null, "", `${location.pathname}${q}`);
++  }
++
++  private attachGame(g: Game): void {
++    this.game = g;
++    this.board.game = g;
++    this.board.selected = null;
++    this.board.flash = null;
++  }
++
++  newGame(fen: string, updateUrl: boolean): void {
++    this.clearTimers();
++    this.mode = "play";
++    this.startFen = fen;
++    this.attachGame(new Game(fen));
++    this.board.orientation = "w";
++    this.gameOverDismissed = false;
++    this.busy = false;
++    if (updateUrl) this.setUrl(fen === START_FEN ? "" : `?fen=${encodeURIComponent(fen)}`);
++    this.renderAll();
++  }
++
++  openPuzzle(i: number, updateUrl: boolean): void {
++    this.clearTimers();
++    const p = this.puzzles[i];
++    if (!p) {
++      this.notice = "Puzzles could not be loaded.";
++      this.newGame(START_FEN, false);
++      return;
++    }
++    this.mode = "puzzle";
++    this.pIndex = i;
++    this.pStep = 0;
++    this.pSolved = false;
++    this.pFeedback = "";
++    this.busy = false;
++    this.attachGame(new Game(p.fen));
++    this.board.orientation = this.game.turn();
++    if (updateUrl) this.setUrl(`?puzzle=${i + 1}`);
++    this.renderAll();
++  }
++
++  private userSide(): Color | null {
++    if (this.busy) return null;
++    if (this.game.isGameOver()) return null;
++    if (this.mode === "puzzle") {
++      const p = this.puzzles[this.pIndex];
++      if (this.pSolved || !p) return null;
++      return new Game(p.fen).turn();
++    }
++    return this.game.turn();
++  }
++
++  private userMove(from: Square, to: Square): void {
++    const options = this.game.legalMoves(from).filter((m) => m.to === to);
++    if (!options.length) return this.renderAll();
++    if (options.some((m) => m.promotion)) {
++      this.showPromotion(from, to);
++      return;
++    }
++    this.commit(from, to);
++  }
++
++  private commit(from: Square, to: Square, promotion?: Promo): void {
++    const mv = this.game.move({ from, to, promotion });
++    if (!mv) return this.renderAll();
++    this.notice = "";
++    if (this.mode === "puzzle") this.checkPuzzleMove(mv);
++    this.renderAll();
++  }
++
++  private uci(m: Move): string {
++    return m.from + m.to + (m.promotion ?? "");
++  }
++
++  private checkPuzzleMove(mv: Move): void {
++    const p = this.puzzles[this.pIndex];
++    const expected = p.solution[this.pStep];
++    const st = this.game.status();
++    // Any mating move is accepted; otherwise it must match the solution.
++    const mates = st.state === "checkmate";
++    if (this.uci(mv) === expected || mates) {
++      this.pStep += 1;
++      if (mates || this.pStep >= p.solution.length) {
++        this.pSolved = true;
++        this.pFeedback = "good";
++        return;
++      }
++      this.pFeedback = "good";
++      this.busy = true;
++      this.later(550, () => {
++        this.game.moveUci(p.solution[this.pStep]);
++        this.pStep += 1;
++        this.busy = false;
++        this.pFeedback = "";
++        this.renderAll();
++      });
++    } else {
++      this.pFeedback = "wrong";
++      this.busy = true;
++      this.board.flash = { squares: [mv.from, mv.to], cls: "wrong" };
++      this.later(700, () => {
++        this.game.undo();
++        this.board.flash = null;
++        this.busy = false;
++        this.renderAll();
++      });
++    }
++  }
++
++  private showPromotion(from: Square, to: Square): void {
++    const color = this.game.turn();
++    const ov = $(this.root, "#overlay");
++    ov.innerHTML = `
++      <div class="scrim" data-action="promo-cancel"></div>
++      <div class="promo" data-testid="promotion" role="dialog" aria-label="Choose promotion piece">
++        <p>Promote to</p>
++        <div class="promo-row">
++          ${(["q", "r", "b", "n"] as Promo[])
++            .map(
++              (t) =>
++                `<button class="promo-btn" data-piece="${t}" data-from="${from}" data-to="${to}" aria-label="${
++                  { q: "Queen", r: "Rook", b: "Bishop", n: "Knight" }[t]
++                }">${pieceSvg(color, t)}</button>`,
++            )
++            .join("")}
++        </div>
++      </div>`;
++  }
++
++  private onClick(e: Event): void {
++    const t = (e.target as HTMLElement).closest<HTMLElement>("[data-action], .promo-btn");
++    if (!t) return;
++    if (t.classList.contains("promo-btn")) {
++      $(this.root, "#overlay").innerHTML = "";
++      this.commit(t.dataset.from!, t.dataset.to!, t.dataset.piece as Promo);
++      return;
++    }
++    switch (t.dataset.action) {
++      case "promo-cancel":
++        $(this.root, "#overlay").innerHTML = "";
++        this.renderAll();
++        break;
++      case "new":
++        this.newGame(this.startFen, false);
++        break;
++      case "new-standard":
++        this.newGame(START_FEN, true);
++        break;
++      case "undo":
++        if (this.mode === "play" && this.game.undo()) {
++          this.gameOverDismissed = false;
++          this.board.selected = null;
++          this.renderAll();
++        }
++        break;
++      case "flip":
++        this.board.orientation = this.board.orientation === "w" ? "b" : "w";
++        this.renderAll();
++        break;
++      case "close-over":
++        this.gameOverDismissed = true;
++        this.renderAll();
++        break;
++      case "retry":
++        this.openPuzzle(this.pIndex, false);
++        break;
++      case "next":
++        this.openPuzzle((this.pIndex + 1) % this.puzzles.length, true);
++        break;
++      case "prev":
++        this.openPuzzle((this.pIndex - 1 + this.puzzles.length) % this.puzzles.length, true);
++        break;
++      case "goto":
++        this.openPuzzle(Number(t.dataset.index), true);
++        break;
++    }
++  }
++
++  private resultText(st: GameStatus): { title: string; detail: string } {
++    switch (st.state) {
++      case "checkmate":
++        return { title: `${NAME[st.winner]} wins`, detail: "by checkmate" };
++      case "stalemate":
++        return { title: "Draw", detail: "by stalemate" };
++      case "draw":
++        return {
++          title: "Draw",
++          detail: st.reason === "threefold" ? "by threefold repetition" : "by the 50-move rule",
++        };
++      default:
++        return { title: "", detail: "" };
++    }
++  }
++
++  private statusLine(): string {
++    const st = this.game.status();
++    if (st.state !== "playing") {
++      const r = this.resultText(st);
++      return `<span class="dot ended"></span>${r.title} ${r.detail}`;
++    }
++    const side = this.game.turn();
++    return `<span class="dot ${side}"></span>${NAME[side]} to move${
++      st.check ? ' <strong class="check-tag">Check</strong>' : ""
++    }`;
++  }
++
++  private moveListHtml(): string {
++    const h = this.game.history();
++    if (!h.length) return `<p class="muted">No moves yet.</p>`;
++    const startBlack = new Game(this.mode === "puzzle" ? this.puzzles[this.pIndex].fen : this.startFen).turn() === "b";
++    const rows: string[] = [];
++    let n = 1;
++    let i = 0;
++    const label = (m: Move) => m.san ?? `${m.from}-${m.to}`;
++    if (startBlack) {
++      rows.push(`<li><span class="num">${n}.</span><span>…</span><span>${label(h[0])}</span></li>`);
++      i = 1;
++      n++;
++    }
++    for (; i < h.length; i += 2, n++) {
++      rows.push(
++        `<li><span class="num">${n}.</span><span>${label(h[i])}</span><span>${h[i + 1] ? label(h[i + 1]) : ""}</span></li>`,
++      );
++    }
++    return `<ol class="moves">${rows.join("")}</ol>`;
++  }
++
++  private panelPlay(): string {
++    return `
++      <div class="card">
++        <h2>Two players</h2>
++        <p class="status" aria-live="polite">${this.statusLine()}</p>
++        ${this.notice ? `<p class="notice">${this.notice}</p>` : ""}
++        <div class="btns">
++          <button class="btn primary" data-action="new">New game</button>
++          <button class="btn" data-action="undo" ${this.game.history().length ? "" : "disabled"}>Undo</button>
++          <button class="btn" data-action="flip">Flip</button>
++        </div>
++      </div>
++      <div class="card moves-card">
++        <h3>Moves</h3>
++        ${this.moveListHtml()}
++      </div>`;
++  }
++
++  private panelPuzzle(): string {
++    const p = this.puzzles[this.pIndex];
++    const side = NAME[new Game(p.fen).turn()];
++    let fb = `<p class="hint">Find the best move for ${side}.</p>`;
++    if (this.pSolved) {
++      fb = `<div class="solved" data-testid="puzzle-solved">
++          <strong>Solved!</strong> <span>Checkmate — well played.</span>
++          <button class="btn primary" data-action="next">Next puzzle →</button>
++        </div>`;
++    } else if (this.pFeedback === "wrong") {
++      fb = `<p class="wrong-msg" role="alert">Not quite — that isn't the move. Try again.</p>`;
++    } else if (this.pFeedback === "good" || this.pStep > 0) {
++      fb = `<p class="good-msg">Good move! ${this.busy ? "Waiting for the reply…" : "Now finish it."}</p>`;
++    }
++    const dots = this.puzzles
++      .map(
++        (q, i) =>
++          `<button class="pdot ${i === this.pIndex ? "on" : ""}" data-action="goto" data-index="${i}" aria-label="Puzzle ${q.id}">${q.id}</button>`,
++      )
++      .join("");
++    return `
++      <div class="card">
++        <div class="ptitle">
++          <h2>Puzzle ${p.id} <span class="muted">/ ${this.puzzles.length}</span></h2>
++          <span class="badge">${p.type === "mate-in-1" ? "Mate in 1" : "Mate in 2"}</span>
++        </div>
++        <p class="status">${side} to play and mate.</p>
++        ${this.notice ? `<p class="notice">${this.notice}</p>` : ""}
++        ${fb}
++        <div class="btns">
++          <button class="btn" data-action="prev">← Prev</button>
++          <button class="btn" data-action="retry">Reset</button>
++          <button class="btn" data-action="next">Next →</button>
++        </div>
++      </div>
++      <div class="card">
++        <h3>All puzzles</h3>
++        <div class="pdots">${dots}</div>
++      </div>`;
++  }
++
++  private renderAll(): void {
++    this.root.querySelectorAll<HTMLElement>("[data-tab]").forEach((b) => {
++      const on = b.dataset.tab === this.mode;
++      b.classList.toggle("on", on);
++      b.setAttribute("aria-selected", String(on));
++    });
++    this.board.render();
++    $(this.root, "#panel").innerHTML = this.mode === "play" ? this.panelPlay() : this.panelPuzzle();
++    const ov = $(this.root, "#overlay");
++    const st = this.game.status();
++    if (this.mode === "play" && st.state !== "playing" && !this.gameOverDismissed) {
++      const r = this.resultText(st);
++      ov.innerHTML = `
++        <div class="scrim"></div>
++        <div class="over" data-testid="game-over" role="dialog" aria-label="Game over">
++          <p class="over-kicker">Game over</p>
++          <h2>${r.title}</h2>
++          <p>${r.detail}</p>
++          <div class="btns">
++            <button class="btn primary" data-action="new-standard">New game</button>
++            <button class="btn" data-action="close-over">View board</button>
++          </div>
++        </div>`;
++    } else if (!ov.querySelector(".promo")) {
++      ov.innerHTML = "";
++    }
++  }
++}
+diff --git a/src/ui/board-view.ts b/src/ui/board-view.ts
+new file mode 100644
+index 0000000..b93c084
+--- /dev/null
++++ b/src/ui/board-view.ts
+@@ -0,0 +1,162 @@
++// Board rendering plus tap-to-move and pointer drag (mouse + touch).
++import type { Color, Game, Move, Square } from "../engine/index.ts";
++import { pieceSvg } from "./pieces.ts";
++
++const FILES = "abcdefgh";
++
++export interface BoardOptions {
++  /** Which side may currently be moved by the user (null = none). */
++  canMove: () => Color | null;
++  /** Called when the user asks to move from → to. */
++  onMove: (from: Square, to: Square) => void;
++}
++
++export class BoardView {
++  el: HTMLElement;
++  game: Game;
++  orientation: Color = "w";
++  selected: Square | null = null;
++  flash: { squares: Square[]; cls: string } | null = null;
++  private opts: BoardOptions;
++  private drag: {
++    from: Square;
++    id: number;
++    startX: number;
++    startY: number;
++    ghost: HTMLElement | null;
++    wasSelected: boolean;
++  } | null = null;
++
++  constructor(el: HTMLElement, game: Game, opts: BoardOptions) {
++    this.el = el;
++    this.game = game;
++    this.opts = opts;
++    el.classList.add("board");
++    el.addEventListener("pointerdown", (e) => this.onDown(e));
++    el.addEventListener("pointermove", (e) => this.onMoveEvt(e));
++    el.addEventListener("pointerup", (e) => this.onUp(e));
++    el.addEventListener("pointercancel", () => this.cancelDrag());
++    el.addEventListener("contextmenu", (e) => e.preventDefault());
++  }
++
++  private targets(): Move[] {
++    if (!this.selected) return [];
++    return this.game.legalMoves(this.selected);
++  }
++
++  render(): void {
++    const g = this.game;
++    const last = g.lastMove();
++    const targets = this.targets();
++    const checkSq = g.inCheck() ? g.kingSquare(g.turn()) : null;
++    const html: string[] = [];
++    for (let r = 0; r < 8; r++) {
++      for (let f = 0; f < 8; f++) {
++        const file = this.orientation === "w" ? f : 7 - f;
++        const rank = this.orientation === "w" ? 7 - r : r;
++        const sq = FILES[file] + (rank + 1);
++        const light = (file + rank) % 2 === 1;
++        const cls = ["sq", light ? "light" : "dark"];
++        if (last && (last.from === sq || last.to === sq)) cls.push("last");
++        if (this.selected === sq) cls.push("selected");
++        if (checkSq === sq) cls.push("check");
++        if (this.flash && this.flash.squares.includes(sq)) cls.push(this.flash.cls);
++        const t = targets.find((m) => m.to === sq);
++        if (t) cls.push(g.get(sq) || t.flags.enPassant ? "target-capture" : "target");
++        const p = g.get(sq);
++        let inner = "";
++        if (f === 0) inner += `<span class="coord rank">${rank + 1}</span>`;
++        if (r === 7) inner += `<span class="coord file">${FILES[file]}</span>`;
++        if (p) {
++          inner += `<div class="piece" data-piece="${p.color}${p.type.toUpperCase()}">${pieceSvg(p.color, p.type)}</div>`;
++        }
++        html.push(`<div class="${cls.join(" ")}" data-square="${sq}">${inner}</div>`);
++      }
++    }
++    this.el.innerHTML = html.join("");
++  }
++
++  private squareAt(x: number, y: number): Square | null {
++    const hit = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-square]");
++    return hit && this.el.contains(hit) ? (hit.dataset.square as Square) : null;
++  }
++
++  private ownPiece(sq: Square): boolean {
++    const side = this.opts.canMove();
++    const p = this.game.get(sq);
++    return !!p && side !== null && p.color === side;
++  }
++
++  private onDown(e: PointerEvent): void {
++    if (e.button !== 0) return;
++    const sq = (e.target as HTMLElement).closest<HTMLElement>("[data-square]")?.dataset.square;
++    if (!sq) return;
++    if (this.selected && this.targets().some((m) => m.to === sq)) {
++      const from = this.selected;
++      this.selected = null;
++      this.opts.onMove(from, sq);
++      return;
++    }
++    if (this.ownPiece(sq)) {
++      e.preventDefault();
++      const wasSelected = this.selected === sq;
++      this.selected = sq;
++      this.render();
++      this.drag = { from: sq, id: e.pointerId, startX: e.clientX, startY: e.clientY, ghost: null, wasSelected };
++      try { this.el.setPointerCapture(e.pointerId); } catch { /* ignore */ }
++    } else if (this.selected) {
++      this.selected = null;
++      this.render();
++    }
++  }
++
++  private onMoveEvt(e: PointerEvent): void {
++    const d = this.drag;
++    if (!d || e.pointerId !== d.id) return;
++    if (!d.ghost) {
++      if (Math.hypot(e.clientX - d.startX, e.clientY - d.startY) < 4) return;
++      const src = this.el.querySelector<HTMLElement>(`[data-square="${d.from}"] .piece`);
++      if (!src) return;
++      const rect = src.getBoundingClientRect();
++      const ghost = document.createElement("div");
++      ghost.className = "drag-ghost";
++      ghost.innerHTML = src.innerHTML;
++      ghost.style.width = `${rect.width}px`;
++      ghost.style.height = `${rect.height}px`;
++      document.body.appendChild(ghost);
++      src.classList.add("dragging");
++      d.ghost = ghost;
++    }
++    const w = d.ghost.offsetWidth;
++    d.ghost.style.transform = `translate(${e.clientX - w / 2}px, ${e.clientY - w / 2}px) scale(1.12)`;
++  }
++
++  private onUp(e: PointerEvent): void {
++    const d = this.drag;
++    if (!d || e.pointerId !== d.id) return;
++    this.drag = null;
++    const dragged = !!d.ghost;
++    d.ghost?.remove();
++    const to = this.squareAt(e.clientX, e.clientY);
++    if (dragged) {
++      if (to && to !== d.from && this.game.legalMoves(d.from).some((m) => m.to === to)) {
++        this.selected = null;
++        this.opts.onMove(d.from, to);
++        return;
++      }
++      this.render();
++      return;
++    }
++    // Plain tap on an already-selected piece toggles it off.
++    if (d.wasSelected && to === d.from) {
++      this.selected = null;
++      this.render();
++    }
++  }
++
++  private cancelDrag(): void {
++    this.drag?.ghost?.remove();
++    this.drag = null;
++    this.render();
++  }
++}
+diff --git a/src/ui/pieces.ts b/src/ui/pieces.ts
+new file mode 100644
+index 0000000..2d57a3a
+--- /dev/null
++++ b/src/ui/pieces.ts
+@@ -0,0 +1,43 @@
++// Original geometric piece set, drawn in code. viewBox 0 0 100 100.
++import type { Color, PieceType } from "../engine/index.ts";
++
++const BASE = `<path d="M24 80 h52 a4 4 0 0 1 4 4 v6 h-60 v-6 a4 4 0 0 1 4-4z"/>`;
++
++const SHAPES: Record<PieceType, string> = {
++  p: `<circle cx="50" cy="31" r="12"/>
++      <path d="M38 46 h24 l-4 6 c6 8 10 17 12 28 h-40 c2-11 6-20 12-28z"/>
++      ${BASE}`,
++  r: `<path d="M27 16 h11 v8 h6 v-8 h12 v8 h6 v-8 h11 v20 h-46z"/>
++      <path d="M32 36 h36 l-4 6 v28 l6 10 h-40 l6-10 v-28z"/>
++      <path class="d" d="M36 44 h28 M36 68 h28" fill="none"/>
++      ${BASE}`,
++  b: `<circle cx="50" cy="12" r="5"/>
++      <path d="M50 17 c12 9 20 22 20 34 c0 9 -8 15 -20 15 c-12 0 -20 -6 -20 -15 c0 -12 8 -25 20 -34z"/>
++      <path class="d" d="M57 30 l-11 14" fill="none"/>
++      <path d="M37 66 h26 l5 14 h-36z"/>
++      ${BASE}`,
++  n: `<path d="M30 80 L36 64 L45 50 L34 55 L24 55 L20 47 L35 28 L46 19 L50 9 L57 18 C70 23 77 37 76 54 L74 80 Z"/>
++      <circle class="e" cx="42" cy="32" r="3.2"/>
++      <path class="d" d="M60 24 C68 32 70 44 68 58" fill="none"/>
++      ${BASE}`,
++  q: `<path d="M27 72 L19 32 L32 52 L36 26 L44 49 L50 20 L56 49 L64 26 L68 52 L81 32 L73 72 Z"/>
++      <circle cx="19" cy="29" r="4.5"/><circle cx="36" cy="23" r="4.5"/>
++      <circle cx="50" cy="16" r="5"/><circle cx="64" cy="23" r="4.5"/>
++      <circle cx="81" cy="29" r="4.5"/>
++      <rect x="26" y="70" width="48" height="10" rx="2"/>
++      ${BASE}`,
++  k: `<path d="M46 8 h8 v8 h8 v8 h-8 v12 h-8 v-12 h-8 v-8 h8z"/>
++      <path d="M28 70 C22 56 24 40 37 38 C44 37 48 42 50 47 C52 42 56 37 63 38 C76 40 78 56 72 70 Z"/>
++      <path class="d" d="M50 47 V68" fill="none"/>
++      <rect x="26" y="68" width="48" height="12" rx="2"/>
++      ${BASE}`,
++};
++
++export function pieceSvg(color: Color, type: PieceType): string {
++  return `<svg class="piece-svg ${color === "w" ? "pw" : "pb"}" viewBox="0 0 100 100" aria-hidden="true">
++    <g stroke-width="3" stroke-linejoin="round" stroke-linecap="round">${SHAPES[type]}</g></svg>`;
++}
++
++export const PIECE_NAMES: Record<PieceType, string> = {
++  p: "pawn", n: "knight", b: "bishop", r: "rook", q: "queen", k: "king",
++};
+diff --git a/tests/e2e/app.spec.ts b/tests/e2e/app.spec.ts
+new file mode 100644
+index 0000000..1452edd
+--- /dev/null
++++ b/tests/e2e/app.spec.ts
+@@ -0,0 +1,77 @@
++import { test, expect, type Page } from "@playwright/test";
++
++const sq = (page: Page, s: string) => page.locator(`[data-square="${s}"]`);
++
++async function tapMove(page: Page, from: string, to: string) {
++  await sq(page, from).click();
++  await sq(page, to).click();
++}
++
++function trackErrors(page: Page): string[] {
++  const errors: string[] = [];
++  page.on("console", (m) => {
++    if (m.type() === "error") errors.push(m.text());
++  });
++  page.on("pageerror", (e) => errors.push(e.message));
++  return errors;
++}
++
++test("plays a two-player game to checkmate (tap and drag)", async ({ page }) => {
++  const errors = trackErrors(page);
++  await page.goto("/");
++  await expect(page.locator("[data-square]")).toHaveCount(64);
++  await expect(sq(page, "e1").locator('[data-piece="wK"]')).toBeVisible();
++
++  await tapMove(page, "f2", "f3");
++  await expect(sq(page, "f3").locator('[data-piece="wP"]')).toBeVisible();
++  await tapMove(page, "e7", "e5");
++  // Drag with the mouse.
++  await sq(page, "g2").locator("[data-piece]").dragTo(sq(page, "g4"));
++  await expect(sq(page, "g4").locator('[data-piece="wP"]')).toBeVisible();
++  await tapMove(page, "d8", "h4");
++
++  const over = page.getByTestId("game-over");
++  await expect(over).toBeVisible();
++  await expect(over).toContainText("Black wins");
++  await expect(over).toContainText("checkmate");
++  expect(errors).toEqual([]);
++});
++
++test("solves a mate-in-2 puzzle with the automatic reply", async ({ page }) => {
++  const errors = trackErrors(page);
++  await page.goto("/?puzzle=7");
++  await expect(sq(page, "a5").locator('[data-piece="wQ"]')).toBeVisible();
++
++  // A wrong move is flagged and taken back.
++  await tapMove(page, "a3", "a4");
++  await expect(page.getByRole("alert")).toContainText("Try again");
++  await expect(sq(page, "a3").locator('[data-piece="wR"]')).toBeVisible();
++
++  await tapMove(page, "a5", "c7");
++  // Defender replies d5d4 automatically.
++  await expect(sq(page, "d4").locator('[data-piece="bP"]')).toBeVisible();
++  await tapMove(page, "a3", "a8");
++  await expect(page.getByTestId("puzzle-solved")).toBeVisible();
++
++  await page.getByTestId("puzzle-solved").getByRole("button", { name: /next/i }).click();
++  await expect(page).toHaveURL(/puzzle=8/);
++  await expect(page.getByTestId("puzzle-solved")).toHaveCount(0);
++  expect(errors).toEqual([]);
++});
++
++test("promotion picker via ?fen", async ({ page }) => {
++  await page.goto(`/?fen=${encodeURIComponent("8/4P3/8/8/8/8/k7/4K3 w - - 0 1")}`);
++  await tapMove(page, "e7", "e8");
++  const picker = page.getByTestId("promotion");
++  await expect(picker.locator("[data-piece]")).toHaveCount(4);
++  await picker.locator('[data-piece="n"]').click();
++  await expect(sq(page, "e8").locator('[data-piece="wN"]')).toBeVisible();
++});
++
++test("no horizontal scroll at 390px", async ({ page }) => {
++  await page.setViewportSize({ width: 390, height: 844 });
++  await page.goto("/?puzzle=1");
++  await expect(page.locator("[data-square]")).toHaveCount(64);
++  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
++  expect(overflow).toBeLessThanOrEqual(0);
++});

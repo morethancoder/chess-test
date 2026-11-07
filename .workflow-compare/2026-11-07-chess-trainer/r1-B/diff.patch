@@ -1,0 +1,1271 @@
+diff --git a/NOTES.md b/NOTES.md
+new file mode 100644
+index 0000000..9e7cce0
+--- /dev/null
++++ b/NOTES.md
+@@ -0,0 +1,25 @@
++# Notes
++
++Layout: `src/engine.ts` (rules, perft, game outcome), `src/pieces.ts` (SVG pieces), `src/main.ts` (UI), `src/style.css`,
++`scripts/perft.ts` (CLI), `scripts/shots.mjs` (screenshots into `.playwright/`).
++
++Reading choices where the brief was unclear:
++
++- **`npm run perft`** prints the bare count from the script, but npm itself prints its two-line `> chess-trainer…` banner
++  before it. Use `npm run -s perft -- "<fen>" <depth>` (or the last line of output) for the count alone. I couldn't set
++  `loglevel=silent` in an `.npmrc` here.
++- **Puzzle answers**: the solution move is accepted; on the final move any move that checkmates is also accepted
++  (some puzzles have several mates). Earlier moves must match the solution. A wrong move is not played: it is flagged
++  and the piece stays put so the player can retry. Mate-in-2 defender replies auto-play after ~0.5 s.
++- **Puzzle orientation**: the board is turned so the side to move is at the bottom. Two-player games keep White at the
++  bottom; "Flip board" is available.
++- **Insufficient material** (K vs K, K+minor vs K) is also treated as a draw; the brief did not ask for it but a game
++  can otherwise never end.
++- **Repetition** counts positions with the same pieces, side to move, castling rights and (only if a legal en passant
++  capture exists) en passant square.
++- **Invalid `?fen=`** falls back to the standard start with a note in the status line. `?puzzle=n` out of range opens
++  puzzle 1. Switching modes updates the URL with `replaceState`.
++- **Game over** shows an overlay (`data-testid="game-over"`) with New game / View board; the result also stays in the
++  status line after the overlay is dismissed.
++- Pawn promotion via drag or tap opens the picker; clicking outside the picker cancels the move.
++- Drag works through pointer events (mouse and touch); the board uses `touch-action: none`.
+diff --git a/package.json b/package.json
+index ce53873..0d532bf 100644
+--- a/package.json
++++ b/package.json
+@@ -8,7 +8,8 @@
+     "build": "tsc && vite build",
+     "preview": "vite preview",
+     "test": "vitest run --passWithNoTests",
+-    "e2e": "playwright test --pass-with-no-tests"
++    "e2e": "playwright test --pass-with-no-tests",
++    "perft": "node --no-warnings scripts/perft.ts"
+   },
+   "devDependencies": {
+     "@playwright/test": "1.65.0",
+diff --git a/scripts/perft.ts b/scripts/perft.ts
+new file mode 100644
+index 0000000..9b11c02
+--- /dev/null
++++ b/scripts/perft.ts
+@@ -0,0 +1,8 @@
++import { parseFen, perft } from "../src/engine.ts";
++
++const [fen, depth] = process.argv.slice(2);
++if (!fen || !depth) {
++  console.error('usage: npm run perft -- "<fen>" <depth>');
++  process.exit(1);
++}
++console.log(perft(parseFen(fen), Number(depth)));
+diff --git a/scripts/shots.mjs b/scripts/shots.mjs
+new file mode 100644
+index 0000000..989006b
+--- /dev/null
++++ b/scripts/shots.mjs
+@@ -0,0 +1,40 @@
++// Takes screenshots into .playwright/. Usage: PORT=... node scripts/shots.mjs
++import { chromium } from "@playwright/test";
++
++import { spawn } from "node:child_process";
++
++const port = process.env.PORT || 5173;
++const server = spawn("npx", ["vite"], { stdio: "ignore", env: { ...process.env, PORT: String(port) } });
++for (let i = 0; i < 50; i++) {
++  try { await fetch(`http://localhost:${port}/`); break; } catch { await new Promise((r) => setTimeout(r, 200)); }
++}
++const browser = await chromium.launch();
++for (const scheme of ["light", "dark"]) {
++  for (const [w, h] of [[390, 844], [1280, 800]]) {
++    const ctx = await browser.newContext({ viewport: { width: w, height: h }, colorScheme: scheme });
++    const page = await ctx.newPage();
++    const errors = [];
++    page.on("console", (m) => m.type() === "error" && errors.push(m.text()));
++    const base = `http://localhost:${port}`;
++    const tag = `${w}-${scheme}`;
++    await page.goto(base + "/");
++    await page.locator('[data-square="e2"]').click();
++    await page.screenshot({ path: `.playwright/game-${tag}.png`, fullPage: true });
++    await page.goto(base + "/?puzzle=6");
++    await page.screenshot({ path: `.playwright/puzzle-${tag}.png`, fullPage: true });
++    await page.goto(base + "/?fen=" + encodeURIComponent("r3k2r/pPp2ppp/8/8/8/8/8/R3K2R w KQkq - 0 1"));
++    await page.locator('[data-square="b7"]').click();
++    await page.locator('[data-square="b8"]').click();
++    await page.screenshot({ path: `.playwright/promo-${tag}.png`, fullPage: true });
++    await page.goto(base + "/");
++    for (const [a, b] of [["f2", "f3"], ["e7", "e5"], ["g2", "g4"], ["d8", "h4"]]) {
++      await page.locator(`[data-square="${a}"]`).click();
++      await page.locator(`[data-square="${b}"]`).click();
++    }
++    await page.screenshot({ path: `.playwright/over-${tag}.png`, fullPage: true });
++    console.log(tag, "errors:", errors.length, "overflow:", await page.evaluate(() => document.documentElement.scrollWidth - innerWidth));
++    await ctx.close();
++  }
++}
++await browser.close();
++server.kill();
+diff --git a/src/engine.ts b/src/engine.ts
+new file mode 100644
+index 0000000..98cc29b
+--- /dev/null
++++ b/src/engine.ts
+@@ -0,0 +1,299 @@
++export type Color = "w" | "b";
++export type PieceType = "P" | "N" | "B" | "R" | "Q" | "K";
++export type Piece = `${Color}${PieceType}`;
++export type Cell = Piece | null;
++export type Promo = "q" | "r" | "b" | "n";
++
++export interface Position {
++  board: Cell[]; // index 0 = a8 ... 63 = h1
++  turn: Color;
++  castling: string; // subset of KQkq
++  ep: number; // en passant target square index or -1
++  halfmove: number;
++  fullmove: number;
++}
++
++export interface Move {
++  from: number;
++  to: number;
++  promo?: Promo;
++  flag?: "ep" | "castleK" | "castleQ" | "double";
++}
++
++export const START_FEN = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1";
++
++export const sqName = (i: number) => "abcdefgh"[i % 8] + (8 - Math.floor(i / 8));
++export const sqIndex = (s: string) => "abcdefgh".indexOf(s[0]) + (8 - Number(s[1])) * 8;
++const file = (i: number) => i % 8;
++const rank = (i: number) => Math.floor(i / 8);
++
++export function parseFen(fen: string): Position {
++  const parts = fen.trim().split(/\s+/);
++  if (parts.length < 2) throw new Error("Bad FEN");
++  const rows = parts[0].split("/");
++  if (rows.length !== 8) throw new Error("Bad FEN");
++  const board: Cell[] = [];
++  for (const row of rows) {
++    let n = 0;
++    for (const ch of row) {
++      if (/\d/.test(ch)) {
++        for (let k = 0; k < Number(ch); k++) board.push(null);
++        n += Number(ch);
++      } else {
++        if (!/[pnbrqkPNBRQK]/.test(ch)) throw new Error("Bad FEN");
++        board.push(((ch === ch.toUpperCase() ? "w" : "b") + ch.toUpperCase()) as Piece);
++        n++;
++      }
++    }
++    if (n !== 8) throw new Error("Bad FEN");
++  }
++  const turn: Color = parts[1] === "b" ? "b" : "w";
++  const castling = (parts[2] ?? "-").replace(/[^KQkq]/g, "");
++  const ep = parts[3] && parts[3] !== "-" ? sqIndex(parts[3]) : -1;
++  return {
++    board,
++    turn,
++    castling,
++    ep,
++    halfmove: Number(parts[4] ?? 0) || 0,
++    fullmove: Number(parts[5] ?? 1) || 1,
++  };
++}
++
++export function toFen(p: Position): string {
++  let s = "";
++  for (let r = 0; r < 8; r++) {
++    let e = 0;
++    for (let f = 0; f < 8; f++) {
++      const c = p.board[r * 8 + f];
++      if (!c) e++;
++      else {
++        if (e) s += e;
++        e = 0;
++        s += c[0] === "w" ? c[1] : c[1].toLowerCase();
++      }
++    }
++    if (e) s += e;
++    if (r < 7) s += "/";
++  }
++  return `${s} ${p.turn} ${p.castling || "-"} ${p.ep >= 0 ? sqName(p.ep) : "-"} ${p.halfmove} ${p.fullmove}`;
++}
++
++const KN = [[1, 2], [2, 1], [-1, 2], [-2, 1], [1, -2], [2, -1], [-1, -2], [-2, -1]];
++const KG = [[1, 0], [-1, 0], [0, 1], [0, -1], [1, 1], [1, -1], [-1, 1], [-1, -1]];
++const DIAG = [[1, 1], [1, -1], [-1, 1], [-1, -1]];
++const ORTH = [[1, 0], [-1, 0], [0, 1], [0, -1]];
++
++const other = (c: Color): Color => (c === "w" ? "b" : "w");
++
++export function isAttacked(board: Cell[], sq: number, by: Color): boolean {
++  const f = file(sq), r = rank(sq);
++  const inside = (nf: number, nr: number) => nf >= 0 && nf < 8 && nr >= 0 && nr < 8;
++  const at = (df: number, dr: number): Cell =>
++    inside(f + df, r + dr) ? board[(r + dr) * 8 + f + df] : null;
++  const pr = by === "w" ? 1 : -1; // a white pawn attacks the square diagonally above it
++  for (const df of [-1, 1]) if (at(df, pr) === `${by}P`) return true;
++  for (const [df, dr] of KN) if (at(df, dr) === `${by}N`) return true;
++  for (const [df, dr] of KG) if (at(df, dr) === `${by}K`) return true;
++  const slide = (dirs: number[][], a: string, b: string) => {
++    for (const [df, dr] of dirs) {
++      for (let k = 1; k < 8; k++) {
++        if (!inside(f + df * k, r + dr * k)) break;
++        const c = board[(r + dr * k) * 8 + f + df * k];
++        if (!c) continue;
++        if (c === by + a || c === by + b) return true;
++        break;
++      }
++    }
++    return false;
++  };
++  return slide(DIAG, "B", "Q") || slide(ORTH, "R", "Q");
++}
++
++export function findKing(board: Cell[], c: Color): number {
++  return board.indexOf(`${c}K`);
++}
++
++export function inCheck(p: Position, c: Color = p.turn): boolean {
++  const k = findKing(p.board, c);
++  return k >= 0 && isAttacked(p.board, k, other(c));
++}
++
++function pseudoMoves(p: Position): Move[] {
++  const out: Move[] = [];
++  const { board, turn } = p;
++  const add = (from: number, to: number, extra: Partial<Move> = {}) => out.push({ from, to, ...extra });
++  for (let i = 0; i < 64; i++) {
++    const pc = board[i];
++    if (!pc || pc[0] !== turn) continue;
++    const f = file(i), r = rank(i);
++    const t = pc[1] as PieceType;
++    if (t === "P") {
++      const dir = turn === "w" ? -1 : 1;
++      const startRank = turn === "w" ? 6 : 1;
++      const lastRank = turn === "w" ? 0 : 7;
++      const push = (to: number) => {
++        if (rank(to) === lastRank) for (const promo of ["q", "r", "b", "n"] as Promo[]) add(i, to, { promo });
++        else add(i, to);
++      };
++      const one = i + dir * 8;
++      if (one < 0 || one > 63) continue;
++      if (!board[one]) {
++        push(one);
++        const two = i + dir * 16;
++        if (r === startRank && !board[two]) add(i, two, { flag: "double" });
++      }
++      for (const df of [-1, 1]) {
++        if (f + df < 0 || f + df > 7) continue;
++        const to = one + df;
++        const tgt = board[to];
++        if (tgt && tgt[0] !== turn) push(to);
++        else if (!tgt && to === p.ep) add(i, to, { flag: "ep" });
++      }
++    } else if (t === "N" || t === "K") {
++      for (const [df, dr] of t === "N" ? KN : KG) {
++        const nf = f + df, nr = r + dr;
++        if (nf < 0 || nf > 7 || nr < 0 || nr > 7) continue;
++        const to = nr * 8 + nf;
++        const c = board[to];
++        if (!c || c[0] !== turn) add(i, to);
++      }
++    } else {
++      const dirs = t === "B" ? DIAG : t === "R" ? ORTH : [...DIAG, ...ORTH];
++      for (const [df, dr] of dirs) {
++        for (let k = 1; k < 8; k++) {
++          const nf = f + df * k, nr = r + dr * k;
++          if (nf < 0 || nf > 7 || nr < 0 || nr > 7) break;
++          const to = nr * 8 + nf;
++          const c = board[to];
++          if (!c) add(i, to);
++          else {
++            if (c[0] !== turn) add(i, to);
++            break;
++          }
++        }
++      }
++    }
++  }
++  const home = turn === "w" ? 60 : 4;
++  const foe = other(turn);
++  if (board[home] === `${turn}K` && !isAttacked(board, home, foe)) {
++    const ks = turn === "w" ? "K" : "k", qs = turn === "w" ? "Q" : "q";
++    if (
++      p.castling.includes(ks) && board[home + 3] === `${turn}R` &&
++      !board[home + 1] && !board[home + 2] &&
++      !isAttacked(board, home + 1, foe) && !isAttacked(board, home + 2, foe)
++    ) add(home, home + 2, { flag: "castleK" });
++    if (
++      p.castling.includes(qs) && board[home - 4] === `${turn}R` &&
++      !board[home - 1] && !board[home - 2] && !board[home - 3] &&
++      !isAttacked(board, home - 1, foe) && !isAttacked(board, home - 2, foe)
++    ) add(home, home - 2, { flag: "castleQ" });
++  }
++  return out;
++}
++
++export function applyMove(p: Position, m: Move): Position {
++  const board = p.board.slice();
++  const pc = board[m.from]!;
++  const captured = board[m.to];
++  board[m.to] = pc;
++  board[m.from] = null;
++  if (m.flag === "ep") board[m.to + (p.turn === "w" ? 8 : -8)] = null;
++  if (m.flag === "castleK") { board[m.from + 1] = board[m.from + 3]; board[m.from + 3] = null; }
++  if (m.flag === "castleQ") { board[m.from - 1] = board[m.from - 4]; board[m.from - 4] = null; }
++  if (m.promo) board[m.to] = `${p.turn}${m.promo.toUpperCase()}` as Piece;
++  let castling = p.castling;
++  const strip = (s: string) => { castling = castling.split("").filter((c) => !s.includes(c)).join(""); };
++  if (pc[1] === "K") strip(p.turn === "w" ? "KQ" : "kq");
++  for (const sq of [m.from, m.to]) {
++    if (sq === 63) strip("K");
++    if (sq === 56) strip("Q");
++    if (sq === 7) strip("k");
++    if (sq === 0) strip("q");
++  }
++  return {
++    board,
++    turn: other(p.turn),
++    castling,
++    ep: m.flag === "double" ? (m.from + m.to) / 2 : -1,
++    halfmove: pc[1] === "P" || captured || m.flag === "ep" ? 0 : p.halfmove + 1,
++    fullmove: p.fullmove + (p.turn === "b" ? 1 : 0),
++  };
++}
++
++export function legalMoves(p: Position): Move[] {
++  return pseudoMoves(p).filter((m) => !inCheck(applyMove(p, m), p.turn));
++}
++
++export function perft(p: Position, depth: number): number {
++  if (depth === 0) return 1;
++  const ms = legalMoves(p);
++  if (depth === 1) return ms.length;
++  let n = 0;
++  for (const m of ms) n += perft(applyMove(p, m), depth - 1);
++  return n;
++}
++
++export function moveToUci(m: Move): string {
++  return sqName(m.from) + sqName(m.to) + (m.promo ?? "");
++}
++
++export function findMove(p: Position, uci: string): Move | undefined {
++  return legalMoves(p).find((m) => moveToUci(m) === uci);
++}
++
++export function insufficientMaterial(p: Position): boolean {
++  const pieces = p.board.filter((c): c is Piece => !!c && c[1] !== "K");
++  return pieces.length === 0 || (pieces.length === 1 && (pieces[0][1] === "B" || pieces[0][1] === "N"));
++}
++
++/** Repetition key: placement, side, castling rights, and ep only when a legal ep capture exists. */
++export function positionKey(p: Position): string {
++  const epOk = p.ep >= 0 && legalMoves(p).some((m) => m.flag === "ep");
++  return toFen({ ...p, ep: epOk ? p.ep : -1, halfmove: 0, fullmove: 0 });
++}
++
++export type Outcome =
++  | { over: false }
++  | {
++      over: true;
++      result: "1-0" | "0-1" | "1/2-1/2";
++      reason: "checkmate" | "stalemate" | "threefold repetition" | "fifty-move rule" | "insufficient material";
++      text: string;
++    };
++
++export class Game {
++  pos: Position;
++  keys: string[];
++  last: Move | null = null;
++  constructor(fen: string = START_FEN) {
++    this.pos = parseFen(fen);
++    this.keys = [positionKey(this.pos)];
++  }
++  legal(): Move[] {
++    return legalMoves(this.pos);
++  }
++  play(m: Move): void {
++    this.pos = applyMove(this.pos, m);
++    this.last = m;
++    this.keys.push(positionKey(this.pos));
++  }
++  outcome(): Outcome {
++    if (this.legal().length === 0) {
++      if (inCheck(this.pos)) {
++        const w = this.pos.turn === "b";
++        return { over: true, result: w ? "1-0" : "0-1", reason: "checkmate", text: `Checkmate — ${w ? "White" : "Black"} wins` };
++      }
++      return { over: true, result: "1/2-1/2", reason: "stalemate", text: "Stalemate — draw" };
++    }
++    const k = this.keys[this.keys.length - 1];
++    if (this.keys.filter((x) => x === k).length >= 3)
++      return { over: true, result: "1/2-1/2", reason: "threefold repetition", text: "Draw by threefold repetition" };
++    if (this.pos.halfmove >= 100)
++      return { over: true, result: "1/2-1/2", reason: "fifty-move rule", text: "Draw by the 50-move rule" };
++    if (insufficientMaterial(this.pos))
++      return { over: true, result: "1/2-1/2", reason: "insufficient material", text: "Draw — insufficient material" };
++    return { over: false };
++  }
++}
+diff --git a/src/main.ts b/src/main.ts
+index 67aeb67..9e134c3 100644
+--- a/src/main.ts
++++ b/src/main.ts
+@@ -1,2 +1,367 @@
+-// Entry point. The app is built here.
+-export {};
++import "./style.css";
++import {
++  Game, inCheck, legalMoves, moveToUci, findKing, sqIndex, sqName, START_FEN,
++  type Move, type Promo, type Color,
++} from "./engine.ts";
++import { pieceSvg, PIECE_NAMES } from "./pieces.ts";
++
++interface Puzzle { id: number; type: string; fen: string; solution: string[] }
++
++type Mode = "game" | "puzzle";
++
++let mode: Mode = "game";
++let game = new Game();
++let puzzles: Puzzle[] = [];
++let puzzleIdx = 0;
++let step = 0;
++let solved = false;
++let busy = false; // defender reply pending
++let selected = -1;
++let pendingPromo: Move[] | null = null;
++let message = "";
++let messageKind: "" | "bad" | "good" = "";
++let overDismissed = false;
++let fenError = "";
++let flipped = false;
++
++const app = document.getElementById("app")!;
++app.innerHTML = `
++  <main class="shell">
++    <header class="top">
++      <h1>Chess trainer</h1>
++      <nav class="tabs" aria-label="Mode">
++        <button id="tab-game" type="button">Two players</button>
++        <button id="tab-puzzle" type="button">Puzzles</button>
++      </nav>
++    </header>
++    <section class="play">
++      <div class="boardwrap">
++        <div id="board" class="board" role="grid" aria-label="Chessboard"></div>
++        <div id="overlay"></div>
++      </div>
++      <aside class="side">
++        <div id="status" class="status" role="status" aria-live="polite"></div>
++        <div id="puzzlebar" class="puzzlebar"></div>
++        <div class="actions">
++          <button id="new" type="button">New game</button>
++          <button id="flip" type="button">Flip board</button>
++        </div>
++      </aside>
++    </section>
++  </main>`;
++
++const boardEl = document.getElementById("board")!;
++const overlayEl = document.getElementById("overlay")!;
++const statusEl = document.getElementById("status")!;
++const puzzleBar = document.getElementById("puzzlebar")!;
++
++const turnName = (c: Color) => (c === "w" ? "White" : "Black");
++
++function setUrl(params: Record<string, string>) {
++  const q = new URLSearchParams(params).toString();
++  history.replaceState(null, "", q ? `?${q}` : location.pathname);
++}
++
++function startGame(fen?: string) {
++  mode = "game";
++  fenError = "";
++  try {
++    game = new Game(fen ?? START_FEN);
++  } catch {
++    fenError = "That FEN could not be read, so a standard game was started.";
++    game = new Game();
++    fen = undefined;
++  }
++  selected = -1; pendingPromo = null; message = ""; messageKind = ""; overDismissed = false; flipped = false;
++  setUrl(fen && fen !== START_FEN ? { fen } : {});
++  render();
++}
++
++function openPuzzle(n: number) {
++  if (!puzzles.length) return;
++  puzzleIdx = ((n - 1 + puzzles.length) % puzzles.length);
++  const p = puzzles[puzzleIdx];
++  mode = "puzzle";
++  game = new Game(p.fen);
++  step = 0; solved = false; busy = false; selected = -1; pendingPromo = null;
++  message = ""; messageKind = ""; overDismissed = false; fenError = "";
++  flipped = game.pos.turn === "b"; // player's side at the bottom
++  setUrl({ puzzle: String(puzzleIdx + 1) });
++  render();
++}
++
++function interactive(): boolean {
++  if (pendingPromo || busy) return false;
++  if (mode === "puzzle") return !solved;
++  return !game.outcome().over;
++}
++
++function targetsOf(from: number): Move[] {
++  return game.legal().filter((m) => m.from === from);
++}
++
++function attempt(from: number, to: number) {
++  const ms = targetsOf(from).filter((m) => m.to === to);
++  if (!ms.length) return;
++  if (ms[0].promo) {
++    pendingPromo = ms;
++    selected = from;
++    render();
++    return;
++  }
++  commit(ms[0]);
++}
++
++function commit(m: Move) {
++  if (mode === "puzzle") {
++    const p = puzzles[puzzleIdx];
++    const isLast = step === p.solution.length - 1;
++    let ok = moveToUci(m) === p.solution[step];
++    if (!ok && isLast) {
++      const after = new Game(p.fen);
++      // replay the line so far to test for an alternative mating move
++      for (let i = 0; i < step; i++) {
++        const prev = legalMoves(after.pos).find((x) => moveToUci(x) === p.solution[i]);
++        if (prev) after.play(prev);
++      }
++      after.play(m);
++      ok = after.outcome().over && inCheck(after.pos);
++    }
++    selected = -1; pendingPromo = null;
++    if (!ok) {
++      message = "Not the move — that doesn't solve it. Try again.";
++      messageKind = "bad";
++      render();
++      flashWrong(m.to);
++      return;
++    }
++    game.play(m);
++    step++;
++    message = ""; messageKind = "";
++    if (step >= p.solution.length) {
++      solved = true;
++      message = "Solved!"; messageKind = "good";
++      render();
++      return;
++    }
++    busy = true;
++    message = "Good move…"; messageKind = "good";
++    render();
++    setTimeout(() => {
++      const reply = legalMoves(game.pos).find((x) => moveToUci(x) === p.solution[step]);
++      if (reply) game.play(reply);
++      step++;
++      busy = false;
++      message = "";
++      messageKind = "";
++      if (step >= p.solution.length) solved = true;
++      render();
++    }, 550);
++    return;
++  }
++  game.play(m);
++  selected = -1; pendingPromo = null; message = ""; messageKind = "";
++  render();
++}
++
++function flashWrong(sq: number) {
++  const el = boardEl.querySelector(`[data-square="${sqName(sq)}"]`);
++  if (!el) return;
++  el.classList.add("wrong");
++  setTimeout(() => el.classList.remove("wrong"), 700);
++}
++
++// ---------- rendering ----------
++
++function render() {
++  const out = game.outcome();
++  const lastM = game.last;
++  const pos = game.pos;
++  const targets = selected >= 0 && interactive() ? targetsOf(selected) : [];
++  const targetSet = new Map(targets.map((m) => [m.to, m]));
++  const checkSq = inCheck(pos) ? findKing(pos.board, pos.turn) : -1;
++  const canMove = interactive();
++  let html = "";
++  for (let vr = 0; vr < 8; vr++) {
++    for (let vf = 0; vf < 8; vf++) {
++      const r = flipped ? 7 - vr : vr;
++      const f = flipped ? 7 - vf : vf;
++      const i = r * 8 + f;
++      const name = sqName(i);
++      const pc = pos.board[i];
++      const cls = ["sq", (r + f) % 2 === 0 ? "light" : "dark"];
++      if (i === selected) cls.push("selected");
++      if (lastM && (i === lastM.from || i === lastM.to)) cls.push("last");
++      if (i === checkSq) cls.push("check");
++      const t = targetSet.get(i);
++      if (t) cls.push(pc || t.flag === "ep" ? "target-capture" : "target");
++      if (canMove && pc && pc[0] === pos.turn) cls.push("own");
++      const label = pc ? `${name} ${pc[0] === "w" ? "white" : "black"} ${PIECE_NAMES[pc[1]]}` : name;
++      const coord =
++        (vf === 0 ? `<span class="coord rank">${8 - r}</span>` : "") +
++        (vr === 7 ? `<span class="coord file">${"abcdefgh"[f]}</span>` : "");
++      html += `<div class="${cls.join(" ")}" data-square="${name}" role="gridcell" aria-label="${label}">${coord}${pc ? pieceSvg(pc) : ""}</div>`;
++    }
++  }
++  boardEl.innerHTML = html;
++  boardEl.classList.toggle("locked", !canMove);
++
++  // status
++  let s: string;
++  if (out.over && mode === "game") s = out.text;
++  else if (mode === "puzzle") {
++    const p = puzzles[puzzleIdx];
++    s = solved ? "Puzzle solved" : `${turnName(pos.turn)} to move — ${p.type.replace("mate-in-", "mate in ")}`;
++  } else s = `${turnName(pos.turn)} to move` + (checkSq >= 0 ? " — check!" : "");
++  statusEl.textContent = fenError ? `${s}. ${fenError}` : s;
++  statusEl.classList.toggle("in-check", checkSq >= 0 && !out.over);
++
++  // puzzle bar
++  document.getElementById("tab-game")!.setAttribute("aria-pressed", String(mode === "game"));
++  document.getElementById("tab-puzzle")!.setAttribute("aria-pressed", String(mode === "puzzle"));
++  document.getElementById("new")!.style.display = mode === "game" ? "" : "none";
++  if (mode === "puzzle" && puzzles.length) {
++    const opts = puzzles
++      .map((p, k) => `<option value="${k + 1}"${k === puzzleIdx ? " selected" : ""}>Puzzle ${k + 1} · ${p.type.replace("mate-in-", "mate in ")}</option>`)
++      .join("");
++    puzzleBar.innerHTML = `
++      <label class="pz-pick">Puzzle <select id="pz-select">${opts}</select></label>
++      <div class="msg ${messageKind}" id="msg">${message}</div>
++      <div class="pz-actions">
++        <button id="pz-reset" type="button">Restart</button>
++        <button id="pz-next" type="button">Next puzzle →</button>
++      </div>`;
++    document.getElementById("pz-select")!.addEventListener("change", (e) => openPuzzle(Number((e.target as HTMLSelectElement).value)));
++    document.getElementById("pz-reset")!.addEventListener("click", () => openPuzzle(puzzleIdx + 1));
++    document.getElementById("pz-next")!.addEventListener("click", () => openPuzzle(puzzleIdx + 2));
++  } else puzzleBar.innerHTML = "";
++
++  // overlays
++  let ov = "";
++  if (pendingPromo) {
++    const c = pos.turn;
++    ov = `<div class="modal" data-testid="promotion" role="dialog" aria-label="Choose promotion piece">
++      <div class="card"><p>Promote to</p><div class="promo-row">${(["q", "r", "b", "n"] as Promo[])
++        .map((k) => `<button type="button" data-piece="${k}" aria-label="${PIECE_NAMES[k.toUpperCase()]}">${pieceSvg((c + k.toUpperCase()) as never, false)}</button>`)
++        .join("")}</div></div></div>`;
++  } else if (mode === "puzzle" && solved) {
++    ov = `<div class="modal" data-testid="puzzle-solved" role="dialog" aria-label="Puzzle solved">
++      <div class="card"><h2>✓ Puzzle solved</h2><p>Checkmate — well found.</p>
++      <button type="button" id="solved-next" class="primary">Next puzzle →</button></div></div>`;
++  } else if (mode === "game" && out.over && !overDismissed) {
++    ov = `<div class="modal" data-testid="game-over" role="dialog" aria-label="Game over">
++      <div class="card"><h2>Game over</h2><p class="result">${out.text}</p><p class="score">${out.result}</p>
++      <div class="row"><button type="button" id="over-new" class="primary">New game</button>
++      <button type="button" id="over-close">View board</button></div></div></div>`;
++  }
++  overlayEl.innerHTML = ov;
++  if (pendingPromo) {
++    overlayEl.querySelectorAll<HTMLButtonElement>("[data-piece]").forEach((b) =>
++      b.addEventListener("click", () => {
++        const promo = b.dataset.piece as Promo;
++        const m = pendingPromo!.find((x) => x.promo === promo)!;
++        pendingPromo = null;
++        commit(m);
++      }),
++    );
++    overlayEl.querySelector(".modal")!.addEventListener("pointerdown", (e) => {
++      if (e.target === e.currentTarget) { pendingPromo = null; selected = -1; render(); }
++    });
++  }
++  document.getElementById("solved-next")?.addEventListener("click", () => openPuzzle(puzzleIdx + 2));
++  document.getElementById("over-new")?.addEventListener("click", () => startGame());
++  document.getElementById("over-close")?.addEventListener("click", () => { overDismissed = true; render(); });
++}
++
++// ---------- input: tap and drag ----------
++
++interface Drag { from: number; startX: number; startY: number; active: boolean; ghost: HTMLElement | null; pid: number }
++let drag: Drag | null = null;
++
++function squareAt(x: number, y: number): number {
++  const el = document.elementFromPoint(x, y)?.closest<HTMLElement>("[data-square]");
++  return el ? sqIndex(el.dataset.square!) : -1;
++}
++
++boardEl.addEventListener("pointerdown", (e) => {
++  if (!interactive() || (e.pointerType === "mouse" && e.button !== 0)) return;
++  const el = (e.target as HTMLElement).closest<HTMLElement>("[data-square]");
++  if (!el) return;
++  const i = sqIndex(el.dataset.square!);
++  const pc = game.pos.board[i];
++  if (selected >= 0 && targetsOf(selected).some((m) => m.to === i)) {
++    attempt(selected, i);
++    e.preventDefault();
++    return;
++  }
++  if (pc && pc[0] === game.pos.turn) {
++    selected = i;
++    render();
++    drag = { from: i, startX: e.clientX, startY: e.clientY, active: false, ghost: null, pid: e.pointerId };
++    e.preventDefault();
++  } else if (selected >= 0) {
++    selected = -1;
++    render();
++  }
++});
++
++window.addEventListener("pointermove", (e) => {
++  if (!drag || e.pointerId !== drag.pid) return;
++  if (!drag.active) {
++    if (Math.hypot(e.clientX - drag.startX, e.clientY - drag.startY) < 6) return;
++    const src = boardEl.querySelector<HTMLElement>(`[data-square="${sqName(drag.from)}"]`);
++    const svg = src?.querySelector<SVGElement>("svg.piece");
++    if (!src || !svg) { drag = null; return; }
++    const size = src.getBoundingClientRect().width;
++    const ghost = svg.cloneNode(true) as unknown as HTMLElement;
++    ghost.removeAttribute("data-piece");
++    ghost.classList.add("ghost");
++    ghost.style.width = ghost.style.height = `${size * 1.15}px`;
++    document.body.appendChild(ghost);
++    svg.classList.add("dragging");
++    drag.ghost = ghost;
++    drag.active = true;
++  }
++  const g = drag.ghost!;
++  const w = parseFloat(g.style.width);
++  g.style.transform = `translate(${e.clientX - w / 2}px, ${e.clientY - w / 2}px)`;
++});
++
++function endDrag(e: PointerEvent, cancelled: boolean) {
++  if (!drag || e.pointerId !== drag.pid) return;
++  const d = drag;
++  drag = null;
++  d.ghost?.remove();
++  if (!d.active) return;
++  boardEl.querySelector("svg.dragging")?.classList.remove("dragging");
++  if (cancelled) return;
++  const to = squareAt(e.clientX, e.clientY);
++  // Dropping on an illegal square just snaps the piece back (it stays selected).
++  if (to >= 0 && to !== d.from && targetsOf(d.from).some((m) => m.to === to)) attempt(d.from, to);
++}
++window.addEventListener("pointerup", (e) => endDrag(e, false));
++window.addEventListener("pointercancel", (e) => endDrag(e, true));
++boardEl.addEventListener("dragstart", (e) => e.preventDefault());
++
++// ---------- chrome ----------
++
++document.getElementById("tab-game")!.addEventListener("click", () => startGame());
++document.getElementById("tab-puzzle")!.addEventListener("click", () => openPuzzle(1));
++document.getElementById("new")!.addEventListener("click", () => startGame());
++document.getElementById("flip")!.addEventListener("click", () => { flipped = !flipped; render(); });
++
++async function init() {
++  const params = new URLSearchParams(location.search);
++  try {
++    const res = await fetch(`${import.meta.env.BASE_URL}puzzles.json`);
++    puzzles = await res.json();
++  } catch {
++    puzzles = [];
++  }
++  const pz = params.get("puzzle");
++  if (pz !== null && puzzles.length) {
++    const n = Number(pz);
++    openPuzzle(Number.isInteger(n) && n >= 1 && n <= puzzles.length ? n : 1);
++  } else startGame(params.get("fen") ?? undefined);
++}
++void init();
+diff --git a/src/pieces.ts b/src/pieces.ts
+new file mode 100644
+index 0000000..201308a
+--- /dev/null
++++ b/src/pieces.ts
+@@ -0,0 +1,35 @@
++import type { Piece } from "./engine.ts";
++
++// Original piece artwork, drawn from simple geometric primitives in a 45x45 box.
++// Fill and stroke come from CSS (.pc-w / .pc-b) so the set follows the theme.
++const SHAPES: Record<string, string> = {
++  P: `<circle cx="22.5" cy="13.5" r="5.5"/>
++      <path d="M22.5 20c-5 3-8 8-8.500 17h17c-.5-9-3.500-14-8.500-17z"/>
++      <rect x="11" y="36" width="23" height="4" rx="2"/>`,
++  R: `<path d="M12 15V8h4.500v3h4V8h4v3h4V8H33v7z"/>
++      <path d="M14.500 15h16l-1.500 18h-13z"/>
++      <rect x="11" y="33" width="23" height="7" rx="2"/>`,
++  N: `<path d="M12 40c0-9 3-13 7-17l-6 1-3.500-3.500C11 12 16 7 24 7c9 1 13 9 12 19l-1 14z"/>
++      <circle cx="22" cy="15" r="1.600" class="eye"/>
++      <path d="M13 21l5-3" class="line"/>`,
++  B: `<circle cx="22.500" cy="7.500" r="3"/>
++      <path d="M22.500 11c7 5 8 12 3.500 17l2.500 5h-12l2.500-5c-4.500-5-3.500-12 3.500-17z"/>
++      <path d="M20 17.500h5M22.500 15v5" class="line"/>
++      <rect x="11" y="33" width="23" height="7" rx="2"/>`,
++  Q: `<path d="M9 14l5.500 19h16L36 14l-6.500 9-2.500-12-4.500 11-4.500-11-2.500 12z"/>
++      <circle cx="9" cy="13" r="2.600"/><circle cx="17" cy="9.500" r="2.600"/>
++      <circle cx="22.500" cy="8" r="2.600"/><circle cx="28" cy="9.500" r="2.600"/><circle cx="36" cy="13" r="2.600"/>
++      <rect x="11" y="33" width="23" height="7" rx="2"/>`,
++  K: `<path d="M22.500 3v8M18.500 6.500h8" class="line thick"/>
++      <path d="M22.500 12c9 0 13 8 10.500 15.500L34 33H11l1-5.500C9.500 20 13.500 12 22.500 12z"/>
++      <rect x="10" y="33" width="25" height="7" rx="2"/>`,
++};
++
++export function pieceSvg(piece: Piece, withData = true): string {
++  const attr = withData ? ` data-piece="${piece}"` : "";
++  return `<svg class="piece pc-${piece[0]}" viewBox="0 0 45 45"${attr} aria-hidden="true">${SHAPES[piece[1]]}</svg>`;
++}
++
++export const PIECE_NAMES: Record<string, string> = {
++  P: "pawn", N: "knight", B: "bishop", R: "rook", Q: "queen", K: "king",
++};
+diff --git a/src/style.css b/src/style.css
+new file mode 100644
+index 0000000..8aa01b9
+--- /dev/null
++++ b/src/style.css
+@@ -0,0 +1,164 @@
++:root {
++  color-scheme: light dark;
++  --bg: #f4efe6;
++  --panel: #fffdf8;
++  --text: #231f1a;
++  --muted: #6b6258;
++  --border: #d8cfc0;
++  --accent: #2f6f5e;
++  --accent-text: #ffffff;
++  --sq-light: #ecd9b0;
++  --sq-dark: #b58863;
++  --sel: rgba(255, 214, 10, 0.55);
++  --last: rgba(255, 214, 10, 0.38);
++  --target: rgba(30, 60, 40, 0.38);
++  --check: rgba(220, 38, 38, 0.85);
++  --wfill: #fffdf6;
++  --wstroke: #1d1a17;
++  --bfill: #2b2630;
++  --bstroke: #0a090b;
++  --shadow: 0 6px 24px rgba(40, 30, 10, 0.15);
++}
++@media (prefers-color-scheme: dark) {
++  :root {
++    --bg: #17191d;
++    --panel: #21242a;
++    --text: #ebe7df;
++    --muted: #a09a8f;
++    --border: #353a43;
++    --accent: #5fb89f;
++    --accent-text: #0d1512;
++    --sq-light: #9aa5b4;
++    --sq-dark: #55657c;
++    --sel: rgba(250, 204, 21, 0.6);
++    --last: rgba(250, 204, 21, 0.34);
++    --target: rgba(10, 20, 30, 0.45);
++    --check: rgba(248, 81, 73, 0.9);
++    --wfill: #f6f1e4;
++    --wstroke: #15130f;
++    --bfill: #1c1920;
++    --bstroke: #05040a;
++    --shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
++  }
++}
++
++* { box-sizing: border-box; }
++html, body { margin: 0; }
++body {
++  background: var(--bg);
++  color: var(--text);
++  font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
++  overflow-x: hidden;
++}
++button, select {
++  font: inherit;
++  color: inherit;
++  background: var(--panel);
++  border: 1px solid var(--border);
++  border-radius: 8px;
++  padding: 0.55rem 0.9rem;
++  min-height: 44px;
++  cursor: pointer;
++}
++button:hover { border-color: var(--accent); }
++button:focus-visible, select:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
++button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
++
++.shell { max-width: 1040px; margin: 0 auto; padding: 12px; }
++.top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; margin-bottom: 12px; }
++h1 { margin: 0; font-size: 1.35rem; letter-spacing: 0.01em; }
++.tabs { display: flex; gap: 6px; }
++.tabs button[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); border-color: var(--accent); font-weight: 600; }
++
++.play { display: flex; flex-direction: column; gap: 14px; }
++.boardwrap { position: relative; width: 100%; max-width: 640px; margin: 0 auto; }
++.board {
++  --size: min(100%, 640px);
++  display: grid;
++  grid-template-columns: repeat(8, minmax(0, 1fr));
++  grid-template-rows: repeat(8, minmax(0, 1fr));
++  aspect-ratio: 1;
++  width: 100%;
++  border-radius: 6px;
++  overflow: hidden;
++  box-shadow: var(--shadow);
++  touch-action: none;
++  user-select: none;
++  -webkit-user-select: none;
++}
++.sq { position: relative; display: flex; align-items: center; justify-content: center; min-width: 0; }
++.sq.light { background: var(--sq-light); }
++.sq.dark { background: var(--sq-dark); }
++.sq.last::before, .sq.selected::before { content: ""; position: absolute; inset: 0; background: var(--last); }
++.sq.selected::before { background: var(--sel); }
++.sq.check::after {
++  content: ""; position: absolute; inset: 0;
++  background: radial-gradient(circle, var(--check) 0%, rgba(220, 38, 38, 0.5) 45%, transparent 75%);
++}
++.sq.target::after {
++  content: ""; position: absolute; width: 28%; height: 28%; border-radius: 50%; background: var(--target);
++}
++.sq.target-capture::after {
++  content: ""; position: absolute; inset: 4%; border-radius: 50%;
++  border: max(3px, 0.7vmin) solid var(--target); background: none;
++}
++.sq.wrong::after { content: ""; position: absolute; inset: 0; background: rgba(220, 38, 38, 0.6); animation: shake 0.35s; }
++@keyframes shake { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
++.sq.own { cursor: grab; }
++.board:not(.locked) .sq.target, .board:not(.locked) .sq.target-capture { cursor: pointer; }
++
++.coord { position: absolute; font-size: clamp(8px, 2.2vw, 12px); font-weight: 700; opacity: 0.7; pointer-events: none; z-index: 1; line-height: 1; }
++.coord.rank { top: 3px; left: 3px; }
++.coord.file { bottom: 3px; right: 3px; }
++.sq.light .coord { color: var(--sq-dark); }
++.sq.dark .coord { color: var(--sq-light); }
++
++svg.piece { position: relative; z-index: 2; width: 92%; height: 92%; pointer-events: none; stroke-width: 1.6; stroke-linejoin: round; stroke-linecap: round; filter: drop-shadow(0 1px 1px rgba(0, 0, 0, 0.3)); }
++svg.piece.pc-w { fill: var(--wfill); stroke: var(--wstroke); }
++svg.piece.pc-b { fill: var(--bfill); stroke: var(--bstroke); }
++svg.piece .line { fill: none; stroke-width: 1.8; }
++svg.piece .line.thick { stroke-width: 2.6; }
++svg.piece.pc-w .eye { fill: var(--wstroke); stroke: none; }
++svg.piece.pc-b .eye { fill: var(--wfill); stroke: none; }
++svg.piece.pc-b .line { stroke: #cfc8d6; }
++svg.piece.pc-b .line.thick { stroke: var(--bstroke); }
++svg.piece.dragging { opacity: 0.25; }
++svg.ghost { position: fixed; left: 0; top: 0; z-index: 100; pointer-events: none; filter: drop-shadow(0 6px 8px rgba(0, 0, 0, 0.4)); stroke-width: 1.6; }
++svg.ghost.pc-w { fill: var(--wfill); stroke: var(--wstroke); }
++svg.ghost.pc-b { fill: var(--bfill); stroke: var(--bstroke); }
++
++.side { display: flex; flex-direction: column; gap: 12px; }
++.status { padding: 12px 14px; background: var(--panel); border: 1px solid var(--border); border-radius: 10px; font-weight: 600; }
++.status.in-check { border-color: #dc2626; color: #dc2626; }
++@media (prefers-color-scheme: dark) { .status.in-check { color: #ff8a80; border-color: #f85149; } }
++.actions, .pz-actions { display: flex; flex-wrap: wrap; gap: 8px; }
++.puzzlebar { display: flex; flex-direction: column; gap: 10px; }
++.pz-pick { display: flex; align-items: center; gap: 8px; color: var(--muted); }
++.pz-pick select { flex: 1; min-width: 0; }
++.msg { min-height: 1.4em; font-weight: 600; }
++.msg.bad { color: #c2261c; }
++.msg.good { color: var(--accent); }
++@media (prefers-color-scheme: dark) { .msg.bad { color: #ff8a80; } }
++
++.modal {
++  position: absolute; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center;
++  background: rgba(10, 10, 12, 0.5); border-radius: 6px; padding: 12px;
++}
++.card {
++  background: var(--panel); border: 1px solid var(--border); border-radius: 14px; padding: 18px 20px;
++  text-align: center; box-shadow: var(--shadow); max-width: 100%;
++}
++.card h2 { margin: 0 0 4px; font-size: 1.3rem; }
++.card p { margin: 4px 0 12px; }
++.card .score { color: var(--muted); font-variant-numeric: tabular-nums; margin-top: -6px; }
++.card .row { display: flex; gap: 8px; justify-content: center; flex-wrap: wrap; }
++.promo-row { display: flex; gap: 8px; justify-content: center; }
++.promo-row button { width: 64px; height: 64px; padding: 4px; background: var(--sq-light); border-color: var(--sq-dark); }
++.promo-row svg.piece { width: 100%; height: 100%; }
++
++@media (min-width: 860px) {
++  .shell { padding: 24px; }
++  .play { flex-direction: row; align-items: flex-start; gap: 28px; }
++  .boardwrap { margin: 0; flex: 0 0 min(640px, calc(100vh - 140px)); width: min(640px, calc(100vh - 140px)); min-width: 360px; }
++  .side { flex: 1; min-width: 240px; max-width: 320px; }
++}
+diff --git a/tests/e2e/app.spec.ts b/tests/e2e/app.spec.ts
+new file mode 100644
+index 0000000..668610f
+--- /dev/null
++++ b/tests/e2e/app.spec.ts
+@@ -0,0 +1,73 @@
++import { expect, test, type Page } from "@playwright/test";
++
++function trackErrors(page: Page) {
++  const errors: string[] = [];
++  page.on("console", (m) => { if (m.type() === "error") errors.push(m.text()); });
++  page.on("pageerror", (e) => errors.push(String(e)));
++  return errors;
++}
++
++const sq = (page: Page, s: string) => page.locator(`[data-square="${s}"]`);
++
++async function move(page: Page, from: string, to: string) {
++  await sq(page, from).click();
++  await sq(page, to).click();
++}
++
++test("plays a game to checkmate", async ({ page }) => {
++  const errors = trackErrors(page);
++  await page.goto("/");
++  await expect(page.locator("[data-square]")).toHaveCount(64);
++  await expect(sq(page, "e1").locator('[data-piece="wK"]')).toHaveCount(1);
++  // illegal: a pawn cannot jump three squares
++  await sq(page, "e2").click();
++  await expect(sq(page, "e4")).toHaveClass(/target/);
++  await expect(sq(page, "e5")).not.toHaveClass(/target/);
++  for (const [a, b] of [["f2", "f3"], ["e7", "e5"], ["g2", "g4"], ["d8", "h4"]]) await move(page, a, b);
++  const over = page.getByTestId("game-over");
++  await expect(over).toBeVisible();
++  await expect(over).toContainText("Checkmate");
++  await expect(over).toContainText("Black wins");
++  expect(errors).toEqual([]);
++});
++
++test("solves a mate-in-1 puzzle and moves on", async ({ page }) => {
++  const errors = trackErrors(page);
++  await page.goto("/?puzzle=1");
++  await expect(page.locator('[data-piece="wQ"]')).toHaveCount(1);
++  await move(page, "e6", "e7"); // wrong, legal move
++  await expect(page.getByTestId("puzzle-solved")).toHaveCount(0);
++  await expect(page.locator("#msg")).toContainText("Try again");
++  await expect(sq(page, "e6").locator('[data-piece="wQ"]')).toHaveCount(1);
++  await move(page, "e6", "h3");
++  await expect(page.getByTestId("puzzle-solved")).toBeVisible();
++  await page.locator("#solved-next").click();
++  await expect(page.getByTestId("puzzle-solved")).toHaveCount(0);
++  expect(page.url()).toContain("puzzle=2");
++  expect(errors).toEqual([]);
++});
++
++test("solves a mate-in-2 puzzle with an automatic reply", async ({ page }) => {
++  await page.goto("/?puzzle=7");
++  await move(page, "a5", "c7");
++  await expect(sq(page, "d4").locator('[data-piece="bP"]')).toHaveCount(1); // defender's reply
++  await move(page, "a3", "a8");
++  await expect(page.getByTestId("puzzle-solved")).toBeVisible();
++});
++
++test("promotion picker and drag to move", async ({ page }) => {
++  await page.goto("/?fen=" + encodeURIComponent("8/P6k/8/8/8/8/8/K7 w - - 0 1"));
++  await sq(page, "a7").dragTo(sq(page, "a8"));
++  const picker = page.getByTestId("promotion");
++  await expect(picker).toBeVisible();
++  await expect(picker.locator("button")).toHaveCount(4);
++  await picker.locator('[data-piece="n"]').click();
++  await expect(sq(page, "a8").locator('[data-piece="wN"]')).toHaveCount(1);
++});
++
++test("no horizontal scroll at phone width", async ({ page }) => {
++  await page.setViewportSize({ width: 390, height: 844 });
++  await page.goto("/");
++  const overflow = await page.evaluate(() => document.documentElement.scrollWidth - window.innerWidth);
++  expect(overflow).toBeLessThanOrEqual(0);
++});
+diff --git a/tests/unit/engine.test.ts b/tests/unit/engine.test.ts
+new file mode 100644
+index 0000000..7ea1f83
+--- /dev/null
++++ b/tests/unit/engine.test.ts
+@@ -0,0 +1,191 @@
++import { describe, expect, it } from "vitest";
++import { Game, START_FEN, findMove, inCheck, legalMoves, moveToUci, parseFen, perft, sqIndex, toFen } from "../../src/engine.ts";
++
++const KIWI = "r3k2r/p1ppqpb1/bn2pnp1/3PN3/1p2P3/2N2Q1p/PPPBBPPP/R3K2R w KQkq - 0 1";
++const ucis = (fen: string) => legalMoves(parseFen(fen)).map(moveToUci);
++
++function playAll(g: Game, moves: string[]) {
++  for (const u of moves) {
++    const m = findMove(g.pos, u);
++    if (!m) throw new Error(`illegal ${u} in ${toFen(g.pos)}`);
++    g.play(m);
++  }
++}
++
++describe("perft", () => {
++  const start = parseFen(START_FEN);
++  it.each([[1, 20], [2, 400], [3, 8902], [4, 197281]])("start depth %i", (d, n) => {
++    expect(perft(start, d)).toBe(n);
++  });
++  const kiwi = parseFen(KIWI);
++  it.each([[1, 48], [2, 2039], [3, 97862]])("kiwipete depth %i", (d, n) => {
++    expect(perft(kiwi, d)).toBe(n);
++  });
++});
++
++describe("fen", () => {
++  it("round-trips", () => {
++    expect(toFen(parseFen(KIWI))).toBe(KIWI);
++  });
++});
++
++describe("legal moves (3)", () => {
++  it("pinned piece cannot move off the pin line", () => {
++    expect(ucis("4k3/8/8/8/8/8/4r3/4KR2 w - - 0 1").filter((u) => u.startsWith("f1"))).toEqual([]);
++  });
++  it("must resolve check", () => {
++    const m = ucis("4k3/8/8/8/8/8/4r3/R3K3 w - - 0 1");
++    expect(m.sort()).toEqual(["e1d1", "e1f1", "e1e2"].sort());
++  });
++});
++
++describe("castling (4)", () => {
++  it("allowed both sides when clear", () => {
++    const m = ucis("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1");
++    expect(m).toContain("e1g1");
++    expect(m).toContain("e1c1");
++  });
++  it("moves the rook", () => {
++    const g = new Game("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1");
++    playAll(g, ["e1g1"]);
++    expect(g.pos.board[sqIndex("f1")]).toBe("wR");
++    expect(g.pos.board[sqIndex("h1")]).toBeNull();
++  });
++  it("not without rights", () => {
++    const m = ucis("r3k2r/8/8/8/8/8/8/R3K2R w kq - 0 1");
++    expect(m).not.toContain("e1g1");
++    expect(m).not.toContain("e1c1");
++  });
++  it("rights lost after rook or king moves", () => {
++    const g = new Game("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1");
++    playAll(g, ["h1h2", "a8a7", "h2h1", "a7a8"]);
++    const m = legalMoves(g.pos).map(moveToUci);
++    expect(m).not.toContain("e1g1");
++    expect(m).toContain("e1c1");
++  });
++  it("not with pieces between", () => {
++    expect(ucis("r3k2r/8/8/8/8/8/8/RN2K1NR w KQkq - 0 1")).not.toContain("e1c1");
++    expect(ucis("r3k2r/8/8/8/8/8/8/RN2K1NR w KQkq - 0 1")).not.toContain("e1g1");
++  });
++  it("not out of check", () => {
++    const m = ucis("4k3/8/8/8/8/8/4r3/R3K2R w KQ - 0 1");
++    expect(m).not.toContain("e1g1");
++    const m2 = ucis("4k3/4r3/8/8/8/8/8/R3K2R w KQ - 0 1");
++    expect(m2).not.toContain("e1g1");
++  });
++  it("not through check", () => {
++    expect(ucis("4k3/8/8/8/8/8/5r2/R3K2R w KQ - 0 1")).not.toContain("e1g1");
++    expect(ucis("4k3/8/8/8/8/8/5r2/R3K2R w KQ - 0 1")).toContain("e1c1");
++  });
++  it("not into check", () => {
++    expect(ucis("4k3/8/8/8/8/8/6r1/R3K2R w KQ - 0 1")).not.toContain("e1g1");
++  });
++  it("queenside allowed when only b1 is attacked", () => {
++    expect(ucis("4k3/8/8/8/8/8/1r6/R3K2R w KQ - 0 1")).toContain("e1c1");
++  });
++  it("black castles too", () => {
++    expect(ucis("r3k2r/8/8/8/8/8/8/4K3 b kq - 0 1")).toEqual(expect.arrayContaining(["e8g8", "e8c8"]));
++  });
++});
++
++describe("en passant (5)", () => {
++  it("available right after the double step, and removes the pawn", () => {
++    const g = new Game("4k3/3p4/8/4P3/8/8/8/4K3 b - - 0 1");
++    playAll(g, ["d7d5"]);
++    expect(legalMoves(g.pos).map(moveToUci)).toContain("e5d6");
++    playAll(g, ["e5d6"]);
++    expect(g.pos.board[sqIndex("d5")]).toBeNull();
++    expect(g.pos.board[sqIndex("d6")]).toBe("wP");
++  });
++  it("not one move later", () => {
++    const g = new Game("4k3/3p4/8/4P3/8/8/7P/4K3 b - - 0 1");
++    playAll(g, ["d7d5", "h2h3", "e8e7"]);
++    expect(legalMoves(g.pos).map(moveToUci)).not.toContain("e5d6");
++  });
++  it("not for a single step", () => {
++    const g = new Game("4k3/8/3p4/4P3/8/8/8/4K3 b - - 0 1");
++    playAll(g, ["d6d5"]);
++    expect(legalMoves(g.pos).map(moveToUci)).not.toContain("e5d6");
++  });
++  it("illegal when it exposes own king", () => {
++    // white king and both pawns on rank 5 with a black rook: capture would open the rank
++    const g = new Game("8/8/8/K2pP2r/8/8/8/4k3 w - d6 0 1");
++    expect(legalMoves(g.pos).map(moveToUci)).not.toContain("e5d6");
++  });
++});
++
++describe("promotion (6)", () => {
++  it("offers all four pieces", () => {
++    const m = ucis("8/P6k/8/8/8/8/8/K7 w - - 0 1").filter((u) => u.startsWith("a7a8"));
++    expect(m.sort()).toEqual(["a7a8b", "a7a8n", "a7a8q", "a7a8r"]);
++  });
++  it("replaces the pawn with the chosen piece", () => {
++    const g = new Game("8/P6k/8/8/8/8/8/K7 w - - 0 1");
++    playAll(g, ["a7a8n"]);
++    expect(g.pos.board[sqIndex("a8")]).toBe("wN");
++  });
++  it("works with capture and for black", () => {
++    const g = new Game("1r5k/P7/8/8/8/8/p7/K7 w - - 0 1");
++    expect(ucis("1r5k/P7/8/8/8/8/p7/K7 w - - 0 1")).toContain("a7b8q");
++    playAll(g, ["a7b8r", "h8g7"]);
++    expect(g.pos.board[sqIndex("b8")]).toBe("wR");
++  });
++});
++
++describe("check (7)", () => {
++  it("is detected", () => {
++    expect(inCheck(parseFen("4k3/8/8/8/8/8/4R3/4K3 b - - 0 1"))).toBe(true);
++    expect(inCheck(parseFen("4k3/8/8/8/8/8/3R4/4K3 b - - 0 1"))).toBe(false);
++  });
++});
++
++describe("checkmate and stalemate (8)", () => {
++  it("fool's mate", () => {
++    const g = new Game();
++    playAll(g, ["f2f3", "e7e5", "g2g4", "d8h4"]);
++    const o = g.outcome();
++    expect(o.over && o.reason).toBe("checkmate");
++    expect(o.over && o.result).toBe("0-1");
++  });
++  it("stalemate", () => {
++    const g = new Game("7k/5Q2/6K1/8/8/8/8/8 b - - 0 1");
++    const o = g.outcome();
++    expect(o.over && o.reason).toBe("stalemate");
++    expect(o.over && o.result).toBe("1/2-1/2");
++  });
++  it("ongoing game is not over", () => {
++    expect(new Game().outcome().over).toBe(false);
++  });
++});
++
++describe("draws (9)", () => {
++  it("threefold repetition", () => {
++    const g = new Game();
++    const shuffle = ["g1f3", "g8f6", "f3g1", "f6g8"];
++    playAll(g, shuffle);
++    expect(g.outcome().over).toBe(false);
++    playAll(g, shuffle);
++    const o = g.outcome();
++    expect(o.over && o.reason).toBe("threefold repetition");
++  });
++  it("repetition does not count when castling rights differ", () => {
++    const g = new Game("r3k2r/8/8/8/8/8/8/R3K2R w KQkq - 0 1");
++    playAll(g, ["a1b1", "a8b8", "b1a1", "b8a8", "a1b1", "a8b8", "b1a1", "b8a8"]);
++    expect(g.outcome().over).toBe(false);
++  });
++  it("50-move rule at 100 half-moves", () => {
++    const g = new Game("4k3/8/8/8/8/8/R7/4K3 w - - 98 80");
++    expect(g.outcome().over).toBe(false);
++    playAll(g, ["a2a3"]);
++    expect(g.outcome().over).toBe(false);
++    playAll(g, ["e8d8"]);
++    const o = g.outcome();
++    expect(o.over && o.reason).toBe("fifty-move rule");
++  });
++  it("pawn move or capture resets the counter", () => {
++    const g = new Game("4k3/8/8/8/8/8/P6R/4K3 w - - 99 80");
++    playAll(g, ["a2a3"]);
++    expect(g.pos.halfmove).toBe(0);
++    expect(g.outcome().over).toBe(false);
++  });
++});
