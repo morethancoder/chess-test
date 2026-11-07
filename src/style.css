@@ -1,0 +1,181 @@
+:root {
+  color-scheme: light dark;
+  --bg: #f4f1ea;
+  --fg: #231f1b;
+  --muted: #6b645b;
+  --card: #fffdf8;
+  --line: #d8d1c4;
+  --accent: #2f6f5e;
+  --accent-fg: #ffffff;
+  --sq-light: #ecdfc4;
+  --sq-dark: #a9835a;
+  --hl-select: rgba(255, 214, 10, 0.65);
+  --hl-last: rgba(255, 214, 10, 0.38);
+  --hl-check: rgba(214, 40, 40, 0.75);
+  --hl-wrong: rgba(214, 40, 40, 0.55);
+  --dot: rgba(30, 30, 30, 0.35);
+  --good: #1f7a45;
+  --bad: #b3261e;
+  --white-fill: #fffaf0;
+  --white-stroke: #2a2420;
+  --black-fill: #4b4655;
+  --black-stroke: #14121a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #17181c;
+    --fg: #ece8df;
+    --muted: #a09a90;
+    --card: #22242a;
+    --line: #373a42;
+    --accent: #5fb89f;
+    --accent-fg: #0d1512;
+    --sq-light: #8a8f9c;
+    --sq-dark: #4d5463;
+    --hl-select: rgba(255, 214, 10, 0.5);
+    --hl-last: rgba(255, 214, 10, 0.3);
+    --dot: rgba(255, 255, 255, 0.4);
+    --good: #6fd39a;
+    --bad: #ff8a80;
+    --white-fill: #f7f1e3;
+    --white-stroke: #0f0e12;
+    --black-fill: #2a2733;
+    --black-stroke: #e9e4d6;
+  }
+}
+
+* { box-sizing: border-box; }
+
+html, body { margin: 0; }
+
+body {
+  background: var(--bg);
+  color: var(--fg);
+  font: 16px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  overflow-x: hidden;
+}
+
+#app {
+  max-width: 1100px;
+  margin: 0 auto;
+  padding: 12px;
+}
+
+header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 16px;
+  margin-bottom: 12px;
+}
+
+h1 { font-size: 1.3rem; margin: 0; }
+h2 { font-size: 1rem; margin: 0 0 8px; color: var(--muted); font-weight: 600; }
+
+nav { display: flex; gap: 4px; padding: 3px; background: var(--card); border: 1px solid var(--line); border-radius: 10px; }
+nav button { border: 0; background: transparent; }
+nav button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); }
+
+button {
+  font: inherit;
+  color: var(--fg);
+  background: var(--card);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  padding: 8px 14px;
+  min-height: 40px;
+  cursor: pointer;
+}
+button:hover:not(:disabled) { border-color: var(--accent); }
+button:focus-visible { outline: 3px solid var(--accent); outline-offset: 2px; }
+button:disabled { opacity: 0.45; cursor: default; }
+
+main { display: flex; flex-direction: column; gap: 14px; align-items: center; }
+
+.board-wrap {
+  position: relative;
+  width: min(100%, 640px, calc(100vh - 140px));
+  min-width: min(100%, 280px);
+}
+
+.board {
+  display: grid;
+  grid-template-columns: repeat(8, minmax(0, 1fr));
+  grid-template-rows: repeat(8, minmax(0, 1fr));
+  aspect-ratio: 1;
+  width: 100%;
+  border-radius: 6px;
+  overflow: hidden;
+  border: 2px solid var(--line);
+  touch-action: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+.sq { position: relative; display: flex; align-items: center; justify-content: center; min-width: 0; }
+.sq.light { background: var(--sq-light); }
+.sq.dark { background: var(--sq-dark); }
+.sq.last::before, .sq.selected::before, .sq.check::before, .sq.wrong::before { content: ""; position: absolute; inset: 0; }
+.sq.last::before { background: var(--hl-last); }
+.sq.selected::before { background: var(--hl-select); }
+.sq.check::before { background: radial-gradient(circle, var(--hl-check) 30%, transparent 75%); }
+.sq.wrong::before { background: var(--hl-wrong); }
+.sq.target::after {
+  content: ""; position: absolute; width: 28%; height: 28%; border-radius: 50%; background: var(--dot); pointer-events: none;
+}
+.sq.capture::after {
+  content: ""; position: absolute; inset: 4%; border-radius: 50%; border: 5px solid var(--dot); pointer-events: none;
+}
+.sq .rank, .sq .file { position: absolute; font-size: clamp(8px, 1.9vw, 12px); font-weight: 700; opacity: 0.75; pointer-events: none; }
+.sq .rank { top: 2px; left: 3px; }
+.sq .file { bottom: 1px; right: 3px; }
+.sq.light .rank, .sq.light .file { color: var(--sq-dark); }
+.sq.dark .rank, .sq.dark .file { color: var(--sq-light); }
+
+.piece { width: 92%; height: 92%; position: relative; pointer-events: none; display: block; }
+.piece .lifted, .piece.lifted { opacity: 0.3; }
+.art { stroke-width: 3.2; stroke-linejoin: round; stroke-linecap: round; }
+.art.white { fill: var(--white-fill); stroke: var(--white-stroke); }
+.art.black { fill: var(--black-fill); stroke: var(--black-stroke); }
+.art .mark { fill: currentColor; stroke: none; }
+.art.white .mark { fill: var(--white-stroke); }
+.art.black .mark { fill: var(--black-stroke); }
+.art .line { fill: none; }
+
+.ghost { position: fixed; left: 0; top: 0; z-index: 50; pointer-events: none; filter: drop-shadow(0 4px 6px rgba(0, 0, 0, 0.4)); }
+
+.side { width: 100%; max-width: 640px; }
+.status { font-size: 1.1rem; font-weight: 600; margin: 0 0 10px; min-height: 1.5em; }
+.status.good { color: var(--good); }
+.status.bad { color: var(--bad); }
+.actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.card {
+  display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px;
+  background: var(--card); border: 1px solid var(--line); border-left: 5px solid var(--good);
+  border-radius: 10px; padding: 12px 14px; margin-bottom: 12px;
+}
+.card button { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); font-weight: 600; }
+
+.promo-backdrop {
+  position: absolute; inset: 0; z-index: 20; display: flex; align-items: center; justify-content: center;
+  background: rgba(0, 0, 0, 0.45); border-radius: 6px;
+}
+.promo { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px; text-align: center; }
+.promo p { margin: 0 0 8px; font-weight: 600; }
+.promo > div { display: flex; gap: 6px; }
+.promo button { width: 60px; height: 60px; padding: 4px; background: var(--sq-light); }
+.promo button .piece { width: 100%; height: 100%; }
+
+@media (min-width: 900px) {
+  #app { padding: 24px; }
+  main { flex-direction: row; align-items: flex-start; justify-content: center; gap: 28px; }
+  .board-wrap { flex: 0 1 640px; }
+  .side { flex: 0 0 280px; width: 280px; }
+}
+
+@media (max-width: 420px) {
+  #app { padding: 8px; }
+  .promo button { width: 52px; height: 52px; }
+}
