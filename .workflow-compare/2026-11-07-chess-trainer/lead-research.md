@@ -1,6 +1,6 @@
 # Lead research note: chess-trainer comparison, steps 0–4
 
-**Approved by the user 2026-11-07:** all 17 AC as written, and all nine picks on the decisions
+**Approved by the user 2026-11-07:** all 17 AC as written, the recipes in `recipes/` (A = B = C prompt), and all nine picks on the decisions
 page: fixed interface, lead-supplied puzzles, pre-installed test tools, automatic draws, system
 theme, $40 cap, exact Haiku instructions for D, allowlist permissions, vedit row corrected
 old → new.

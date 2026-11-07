@@ -1,5 +1,3 @@
-DRAFT
-
 Build the app described in `brief.md` in this repository. Its numbered items are the requirements; items 19-23 are a fixed interface that outside checks use exactly.
 
 Ground rules:

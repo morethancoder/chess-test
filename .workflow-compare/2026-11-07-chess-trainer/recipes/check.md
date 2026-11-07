@@ -1,5 +1,3 @@
-DRAFT
-
 A previous session built the app in this repository from `brief.md`. Your job is a checklist pass, not a rebuild.
 
 1. Go through `checklist.md` line by line. For each line, check it against the code and the running app (the dev server port is in `$PORT`; Playwright is installed).
