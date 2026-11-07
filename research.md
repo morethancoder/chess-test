@@ -47,3 +47,7 @@
 - **Game-over: can the board still be used?** No; the board is locked, a "New game" button is offered.
 - **Dragging details:** pointer events with a ghost piece following the cursor; drop on a legal target moves, else cancels; a tap without movement is handled as tap-to-move.
 - **Testing hooks for e2e:** only the specified attributes; e2e clicks squares by `data-square`.
+
+## Verification (end of build)
+
+Criteria 1–27 were checked against the running app. 1, 3, 4, 5, 6, 11–13, 17–19, 25–27 are covered by the e2e tests (including an error-free console check after every test) or screenshots in `.playwright/`; 6–10, 20–21 by unit tests (43 passing); 14–16 by CSS/screenshot review at 390 and 1280 px in light and dark; 23 and 24 by running `npm test`, `npm run e2e`, `npm run build` and `npm run perft`. Not automated: touch drag (criterion 18, touch half).
