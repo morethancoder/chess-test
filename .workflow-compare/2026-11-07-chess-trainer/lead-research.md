@@ -82,3 +82,27 @@ builds before round 1. Approve or edit by number ("AC 3 ok, drop 9").
   script knows the solutions.
 - **Do the vedit transcripts still exist?** They're from 2026-11-05, so they should. If they're
   gone, AC 4 shrinks to testing on this run's dry run.
+
+## Built 2026-11-07: what changed from the AC above
+
+- **AC 5/8:** the scaffold's `.gitignore` (node_modules, dist, `.playwright/`) is in the base commit,
+  because builds need it. The second commit only adds `.venv/`, `.env` and the stub folder.
+  The base commit is tagged `base` (`5618eb6`). The tooling commit is `4f843ea`.
+- **AC 11, isolation (new):** every session runs with `--setting-sources project
+  --strict-mcp-config --settings '{"claudeMdExcludes": ["~/.claude/CLAUDE.md"]}'`.
+  `--setting-sources project` alone still loaded the global CLAUDE.md, because
+  `~/.claude/CLAUDE.md` is also the ancestor project file `<home>/.claude/CLAUDE.md` of every
+  worktree under home. A probe checked this: with the exclusion, the session quotes no rule
+  ("RULES: NONE"); without it, it quotes the "Content moments" line. No user hooks appear in the
+  transcripts.
+- **AC 12:** `Agent` is in D's allowlist only, and A, B, C and E get `--disallowedTools Agent`, so a
+  single-model variant can't spawn subagents. D's `reader`/`editor` come from `~/.claude/agents`,
+  frozen into `agents.json` with pinned model ids.
+- **AC 14:** `npm test` or `npm run e2e` exiting 0 with no tests counts as FAIL ("no tests ran").
+- **AC 17, dry run (`make dry`, `.workflow-compare/dryrun/`):**
+  - Haiku launch: ok, $0.0032, billed = `total_cost_usd`.
+  - Cap: ends "failed: cap".
+  - The `reader` agent runs on Haiku.
+  - Stub app: 14/14 checks, 20/20 shots.
+  - Negative test on the empty base app: 9 FAILs, 0/20 shots, no crash.
+  - Total under $0.05.
