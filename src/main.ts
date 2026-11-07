@@ -197,7 +197,7 @@ function renderStatus() {
       text = "Good move! Waiting for the reply…";
     } else {
       const p = puzzles[puzzle.index];
-      text = `${sideName(game.turn)} to move — ${p.type.replace(/-/g, " ")}`;
+      text = `${sideName(game.turn)} to move — ${typeLabel(p.type).toLowerCase()}`;
       if (puzzle.step > 0) text = `Good — now finish it. ${sideName(game.turn)} to move`;
     }
   } else if (s.over) {
@@ -208,7 +208,11 @@ function renderStatus() {
     if (s.check) tone = "bad";
   }
   statusEl.className = `status ${tone}`;
-  statusEl.innerHTML = `<span class="turn-dot ${game.turn}" aria-hidden="true"></span><span>${esc(text)}</span>`;
+  const ended = s.over || !!puzzle?.solved;
+  const icon = ended
+    ? `<span class="status-icon" aria-hidden="true">${puzzle?.solved || (s.over && s.winner) ? "✓" : "½"}</span>`
+    : `<span class="turn-dot ${game.turn}" aria-hidden="true"></span>`;
+  statusEl.innerHTML = `${icon}<span>${esc(text)}</span>`;
 }
 
 function renderOverlay() {
@@ -240,7 +244,7 @@ function renderOverlay() {
     html = `<div class="card result" data-testid="game-over" role="status">
       <div class="badge ${s.over && s.winner ? "win" : "draw"}" aria-hidden="true">${s.over && s.winner ? "#" : "½"}</div>
       <p class="card-title">${esc(resultText(s))}</p>
-      <p class="card-sub">${game.moves.length ? `After ${Math.ceil(game.moves.length / 2)} move${game.moves.length > 2 ? "s" : ""}.` : "Game over."}</p>
+      <p class="card-sub">${movesSummary()}</p>
       <div class="card-actions">
         <button type="button" class="btn primary" data-action="new-game">New game</button>
         <button type="button" class="btn" data-action="dismiss">View board</button>
@@ -251,6 +255,13 @@ function renderOverlay() {
   overlayEl.classList.toggle("light", !promotion);
   if (overlayEl.innerHTML !== html) overlayEl.innerHTML = html;
 }
+
+function movesSummary() {
+  const n = game.turn === "w" ? game.pos.fullmove - 1 : game.pos.fullmove;
+  return n > 0 ? `After ${n} move${n === 1 ? "" : "s"}.` : "Game over.";
+}
+
+const typeLabel = (t: string) => t.replace(/^mate-in-(\d+)$/, "Mate in $1");
 
 function renderPanel() {
   if (mode === "play") {
@@ -291,7 +302,7 @@ function renderPanel() {
   panelEl.innerHTML = `
     <div class="panel-head">
       <h2>Puzzle ${puzzle.index + 1} <span class="muted">of ${puzzles.length}</span></h2>
-      <p class="muted"><span class="pill">${p.type.replace(/-/g, " ")}</span> ${sideName(parseFen(p.fen).turn)} to play and mate.</p>
+      <p class="muted"><span class="pill">${esc(typeLabel(p.type))}</span> ${sideName(parseFen(p.fen).turn)} to play and mate.</p>
     </div>
     ${notice ? `<p class="notice">${esc(notice)}</p>` : ""}
     <div class="controls">
@@ -514,7 +525,11 @@ boardEl.addEventListener("pointerdown", (e) => {
     wasSelected,
     el: squareEls[sq].querySelector<HTMLElement>(".piece"),
   };
-  boardEl.setPointerCapture(e.pointerId);
+  try {
+    boardEl.setPointerCapture(e.pointerId);
+  } catch {
+    /* synthetic pointers can't be captured; dragging still works without it */
+  }
 });
 
 boardEl.addEventListener("pointermove", (e) => {

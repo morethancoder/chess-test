@@ -48,8 +48,8 @@
     --sq-dark: #627789;
     --coord-on-light: #4f6274;
     --coord-on-dark: #dce4ec;
-    --hl-select: rgba(255, 204, 64, 0.62);
-    --hl-last: rgba(255, 210, 90, 0.4);
+    --hl-select: rgba(255, 196, 46, 0.72);
+    --hl-last: rgba(255, 200, 70, 0.5);
     --hl-target: rgba(10, 16, 24, 0.35);
     --shadow: 0 10px 30px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.3);
     --b-fill: #25272c;
@@ -77,8 +77,15 @@ button { font: inherit; color: inherit; }
   background: var(--surface); border: 1px solid var(--border);
 }
 .tab {
-  border: 0; background: transparent; padding: 7px 14px; border-radius: 999px; cursor: pointer;
-  font-weight: 600; font-size: 0.92rem; color: var(--muted);
+  border: 0; background: transparent; padding: 7px 12px; border-radius: 999px; cursor: pointer;
+  font-weight: 600; font-size: 0.86rem; color: var(--muted); white-space: nowrap;
+}
+@media (max-width: 879px) {
+  .brand { font-size: 1.05rem; gap: 6px; }
+  .brand-mark { width: 24px; height: 24px; }
+}
+@media (max-width: 340px) {
+  .top { justify-content: center; }
 }
 .tab[aria-pressed="true"] { background: var(--accent); color: var(--accent-text); }
 .tab:focus-visible, .btn:focus-visible, .pz:focus-visible, .promo-btn:focus-visible, .link-btn:focus-visible {
@@ -112,6 +119,10 @@ button { font: inherit; color: inherit; }
 }
 .turn-dot.w { background: var(--w-fill); }
 .turn-dot.b { background: var(--b-fill); border-color: var(--muted); }
+.status-icon {
+  width: 20px; height: 20px; border-radius: 50%; flex: none; display: grid; place-items: center;
+  font-size: 0.75rem; font-weight: 800; background: var(--accent); color: var(--accent-text);
+}
 
 /* ---------- board ---------- */
 .board-frame { position: relative; aspect-ratio: 1; }
@@ -172,7 +183,7 @@ button { font: inherit; color: inherit; }
   position: absolute; inset: 0; display: grid; place-items: center; z-index: 20; border-radius: 10px;
   background: rgba(15, 15, 18, 0.45); padding: 12px;
 }
-.overlay.light { background: rgba(15, 15, 18, 0.22); backdrop-filter: blur(1px); }
+.overlay.light { background: rgba(15, 15, 18, 0.18); }
 .overlay[hidden] { display: none; }
 .card {
   background: var(--surface); color: var(--text); border-radius: var(--radius); box-shadow: var(--shadow);
@@ -211,9 +222,10 @@ button { font: inherit; color: inherit; }
 }
 .pill {
   display: inline-block; padding: 1px 8px; border-radius: 999px; background: var(--surface-2);
-  border: 1px solid var(--border); color: var(--text); font-size: 0.82rem; font-weight: 600; text-transform: capitalize;
+  border: 1px solid var(--border); color: var(--text); font-size: 0.82rem; font-weight: 600;
 }
-.controls { display: flex; flex-wrap: wrap; gap: 8px; }
+.controls { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.controls .btn { padding-inline: 8px; white-space: nowrap; }
 .btn {
   border: 1px solid var(--border); background: var(--surface-2); padding: 8px 14px; border-radius: 10px;
   cursor: pointer; font-weight: 600; font-size: 0.92rem; min-height: 40px;
