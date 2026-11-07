@@ -38,7 +38,6 @@ function button(label: string, onClick: () => void, cls = 'btn'): HTMLButtonElem
 }
 
 export class App {
-  private root: HTMLElement;
   private board: BoardView;
   private panel: HTMLElement;
   private tabs: HTMLElement;
@@ -66,7 +65,6 @@ export class App {
   private replyTimer = 0;
 
   constructor(root: HTMLElement) {
-    this.root = root;
     this.board = new BoardView({ onMove: (m) => this.onUserMove(m) });
     this.panel = el('aside', 'panel');
     this.tabs = el('nav', 'tabs');

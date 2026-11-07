@@ -98,7 +98,7 @@ test('?fen starts from a position and underpromotion works', async ({ page }) =>
 });
 
 test('stalemate shows the game-over screen', async ({ page }) => {
-  await page.goto('/?fen=' + encodeURIComponent('k7/8/2Q5/8/8/8/8/7K w - - 0 1'));
-  await tapMove(page, 'c6', 'b6');
+  await page.goto('/?fen=' + encodeURIComponent('k7/8/8/2Q5/8/8/8/7K w - - 0 1'));
+  await tapMove(page, 'c5', 'b6');
   await expect(page.getByTestId('game-over')).toContainText('Stalemate');
 });
