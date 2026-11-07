@@ -1,2 +1,5 @@
-// Entry point. The app is built here.
-export {};
+import './style.css';
+import { App } from './ui/app.ts';
+
+const root = document.getElementById('app');
+if (root) void new App(root).start();
