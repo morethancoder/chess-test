@@ -1,0 +1,24 @@
+{
+  "ms": 10050,
+  "status": "ok",
+  "pinned_model": "claude-haiku-5-5",
+  "models_used": [
+    "claude-haiku-5-5"
+  ],
+  "parts": [
+    {
+      "model": "haiku",
+      "ms": 10050,
+      "step": "build",
+      "session": "276e0e20-03b6-4eb4-8422-cf3c4c67cf90",
+      "total_cost_usd": 0.0022412400000000002,
+      "status": "ok",
+      "turns": 4,
+      "models_used": [
+        "claude-haiku-5-5"
+      ],
+      "denied": [],
+      "exit": 0
+    }
+  ]
+}

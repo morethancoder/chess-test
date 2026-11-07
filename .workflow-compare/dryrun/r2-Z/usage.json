@@ -1,0 +1,24 @@
+{
+  "ms": 3966,
+  "status": "failed: cap",
+  "pinned_model": "claude-haiku-5-5",
+  "models_used": [
+    "claude-haiku-5-5"
+  ],
+  "parts": [
+    {
+      "model": "haiku",
+      "ms": 3966,
+      "step": "build",
+      "session": "c45115cc-047f-4e2f-91dd-84d915aab315",
+      "total_cost_usd": 0.00125702,
+      "status": "failed: cap",
+      "turns": 1,
+      "models_used": [
+        "claude-haiku-5-5"
+      ],
+      "denied": [],
+      "exit": 1
+    }
+  ]
+}

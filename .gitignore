@@ -27,3 +27,8 @@ dist-ssr
 .playwright/
 test-results/
 playwright-report/
+
+# Lead tooling
+.venv/
+.env
+.workflow-compare/*/stub/

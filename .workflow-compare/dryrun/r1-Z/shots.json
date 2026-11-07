@@ -1,0 +1,25 @@
+{
+  "shots": [
+    "/Users/alitahseen/Demos/chess-test/.playwright/dryrun/r1-Z/start-390-light.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/dryrun/r1-Z/start-390-dark.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/dryrun/r1-Z/start-1280-light.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/dryrun/r1-Z/start-1280-dark.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/dryrun/r1-Z/midgame-390-light.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/dryrun/r1-Z/midgame-390-dark.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/dryrun/r1-Z/midgame-1280-light.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/dryrun/r1-Z/midgame-1280-dark.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/dryrun/r1-Z/solved-390-light.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/dryrun/r1-Z/solved-390-dark.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/dryrun/r1-Z/solved-1280-light.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/dryrun/r1-Z/solved-1280-dark.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/dryrun/r1-Z/promotion-390-light.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/dryrun/r1-Z/promotion-390-dark.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/dryrun/r1-Z/promotion-1280-light.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/dryrun/r1-Z/promotion-1280-dark.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/dryrun/r1-Z/mate-390-light.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/dryrun/r1-Z/mate-390-dark.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/dryrun/r1-Z/mate-1280-light.png",
+    "/Users/alitahseen/Demos/chess-test/.playwright/dryrun/r1-Z/mate-1280-dark.png"
+  ],
+  "failed": {}
+}

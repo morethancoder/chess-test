@@ -1,0 +1,25 @@
+{
+  "shots": [],
+  "failed": {
+    "start-390-light": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.",
+    "start-390-dark": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.",
+    "start-1280-light": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.",
+    "start-1280-dark": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.",
+    "midgame-390-light": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.",
+    "midgame-390-dark": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.",
+    "midgame-1280-light": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.",
+    "midgame-1280-dark": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.",
+    "solved-390-light": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.",
+    "solved-390-dark": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.",
+    "solved-1280-light": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.",
+    "solved-1280-dark": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.",
+    "promotion-390-light": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.",
+    "promotion-390-dark": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.",
+    "promotion-1280-light": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.",
+    "promotion-1280-dark": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.",
+    "mate-390-light": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.",
+    "mate-390-dark": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.",
+    "mate-1280-light": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded.",
+    "mate-1280-dark": "TimeoutError: locator.waitFor: Timeout 10000ms exceeded."
+  }
+}
