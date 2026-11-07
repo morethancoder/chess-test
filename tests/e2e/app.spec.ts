@@ -96,6 +96,20 @@ test("drag to move with the mouse", async ({ page }) => {
   await expect(sq(page, "g1")).toHaveClass(/last-move/);
 });
 
+test("drag with locator.dragTo, and an illegal drop snaps back", async ({ page }) => {
+  await page.goto("/");
+  await sq(page, "e2").locator("[data-piece]").dragTo(sq(page, "e5"));
+  await expect(sq(page, "e2").locator('[data-piece="wP"]')).toHaveCount(1);
+  await sq(page, "e2").locator("[data-piece]").dragTo(sq(page, "e4"));
+  await expect(sq(page, "e4").locator('[data-piece="wP"]')).toHaveCount(1);
+});
+
+test("threefold repetition ends the game as a draw", async ({ page }) => {
+  await page.goto("/");
+  for (let i = 0; i < 2; i++) for (const m of ["g1f3", "g8f6", "f3g1", "f6g8"]) await move(page, m);
+  await expect(page.getByTestId("game-over")).toContainText("Threefold repetition");
+});
+
 test("illegal moves are refused and legal targets are shown", async ({ page }) => {
   await page.goto("/");
   await sq(page, "e2").click();

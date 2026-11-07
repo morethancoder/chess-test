@@ -254,8 +254,8 @@ button {
 }
 .coord {
   position: absolute;
-  font-size: max(9px, calc(var(--board) / 48));
-  font-weight: 700;
+  font-size: max(10.5px, calc(var(--board) / 42));
+  font-weight: 750;
   line-height: 1;
   pointer-events: none;
 }
@@ -454,6 +454,18 @@ body.is-dragging * {
 }
 .controls .btn {
   flex: 1 1 auto;
+}
+.pz-controls {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+}
+.pz-controls .btn {
+  padding-inline: 6px;
+}
+@media (min-width: 900px) {
+  .pz-controls {
+    grid-template-columns: repeat(2, 1fr);
+  }
 }
 .status {
   display: flex;

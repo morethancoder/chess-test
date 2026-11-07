@@ -207,7 +207,7 @@ function renderOverlay() {
       <div class="card result solved" data-testid="puzzle-solved" role="dialog" aria-label="Puzzle solved">
         <div class="badge good" aria-hidden="true">✓</div>
         <p class="card-title">Solved!</p>
-        <p class="card-sub">Puzzle ${p.id} · ${p.type.replace(/-/g, " ")}</p>
+        <p class="card-sub">Puzzle ${p.id} · ${p.type === "mate-in-2" ? "Mate in 2" : "Mate in 1"}</p>
         <div class="card-actions">
           <button type="button" class="btn primary" data-action="next-puzzle">Next puzzle</button>
           <button type="button" class="btn" data-action="dismiss">View board</button>
@@ -262,9 +262,9 @@ function renderPanel() {
     if (s.over) {
       const r = describeResult(s);
       const testid = resultDismissed ? ` data-testid="game-over"` : "";
-      statusHtml = `<div class="status over"${testid}><span class="dot ${s.winner ?? "draw"}"></span><strong>${r.title}</strong>&nbsp;· ${r.detail}</div>`;
+      statusHtml = `<div class="status over"${testid}><span class="dot ${s.winner ?? "draw"}"></span><strong>${r.title}</strong> · ${r.detail}</div>`;
     } else {
-      statusHtml = `<div class="status"><span class="dot ${g.turn}"></span><strong>${sideName(g.turn)}</strong>&nbsp;to move${s.check ? ` <span class="pill danger">Check</span>` : ""}</div>`;
+      statusHtml = `<div class="status"><span class="dot ${g.turn}"></span><span><strong>${sideName(g.turn)}</strong> to move</span>${s.check ? ` <span class="pill danger">Check</span>` : ""}</div>`;
     }
     panelEl.innerHTML = `
       ${noticeHtml}
@@ -304,7 +304,7 @@ function renderPanel() {
     </div>
     <div class="status"><span class="dot ${puzzleSide()}"></span>${side} to move and mate in ${moves}.</div>
     ${solvedBanner || (fb ? `<div class="feedback ${fb.kind}">${esc(fb.text)}</div>` : `<div class="feedback info">Find the checkmate.</div>`)}
-    <div class="controls">
+    <div class="controls pz-controls">
       <button type="button" class="btn" data-action="hint" ${pz.solved ? "disabled" : ""}>Hint</button>
       <button type="button" class="btn" data-action="restart">Restart</button>
       <button type="button" class="btn" data-action="prev-puzzle" aria-label="Previous puzzle">← Prev</button>
@@ -340,6 +340,8 @@ function attemptMove(from: number, to: number, dragged: boolean) {
 
 function commit(m: Move, dragged: boolean) {
   selected = null;
+  wrongSquares = [];
+  clearTimeout(wrongTimer);
   if (mode === "play") {
     playGame.play(m);
     resultDismissed = false;
