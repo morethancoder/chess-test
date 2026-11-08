@@ -507,6 +507,514 @@
    "plus": 1325,
    "minus": 3,
    "playable": true
+  },
+  {
+   "name": "r2-A",
+   "round": 2,
+   "variant": "A",
+   "status": "ok",
+   "models": [
+    "claude-opus-5-5"
+   ],
+   "min": 14.7,
+   "usd": 2.82,
+   "parts": [
+    {
+     "step": "build",
+     "model": "opus",
+     "min": 14.7,
+     "turns": 75,
+     "usd": 2.82,
+     "denied": 11
+    }
+   ],
+   "checks": [
+    {
+     "ok": true,
+     "name": "perft start depth 1",
+     "detail": "20"
+    },
+    {
+     "ok": true,
+     "name": "perft start depth 2",
+     "detail": "400"
+    },
+    {
+     "ok": true,
+     "name": "perft start depth 3",
+     "detail": "8902"
+    },
+    {
+     "ok": true,
+     "name": "perft start depth 4",
+     "detail": "197281"
+    },
+    {
+     "ok": true,
+     "name": "perft kiwipete depth 1",
+     "detail": "48"
+    },
+    {
+     "ok": true,
+     "name": "perft kiwipete depth 2",
+     "detail": "2039"
+    },
+    {
+     "ok": true,
+     "name": "perft kiwipete depth 3",
+     "detail": "97862"
+    },
+    {
+     "ok": true,
+     "name": "npm run test",
+     "detail": "3 passed 53 passed"
+    },
+    {
+     "ok": true,
+     "name": "npm run e2e",
+     "detail": "15 passed"
+    },
+    {
+     "ok": true,
+     "name": "npm run build",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "name": "console errors",
+     "detail": "none"
+    },
+    {
+     "ok": true,
+     "name": "no horizontal scroll at 390 px (home)",
+     "detail": "scrollWidth 390"
+    },
+    {
+     "ok": true,
+     "name": "no horizontal scroll at 390 px (fen)",
+     "detail": "scrollWidth 390"
+    },
+    {
+     "ok": true,
+     "name": "no horizontal scroll at 390 px (puzzle)",
+     "detail": "scrollWidth 390"
+    }
+   ],
+   "shots": 20,
+   "files": 14,
+   "plus": 2446,
+   "minus": 4,
+   "playable": true
+  },
+  {
+   "name": "r2-B",
+   "round": 2,
+   "variant": "B",
+   "status": "ok",
+   "models": [
+    "claude-sonnet-5-5"
+   ],
+   "min": 4.4,
+   "usd": 0.73,
+   "parts": [
+    {
+     "step": "build",
+     "model": "sonnet",
+     "min": 4.4,
+     "turns": 43,
+     "usd": 0.73,
+     "denied": 7
+    }
+   ],
+   "checks": [
+    {
+     "ok": true,
+     "name": "perft start depth 1",
+     "detail": "20"
+    },
+    {
+     "ok": true,
+     "name": "perft start depth 2",
+     "detail": "400"
+    },
+    {
+     "ok": true,
+     "name": "perft start depth 3",
+     "detail": "8902"
+    },
+    {
+     "ok": true,
+     "name": "perft start depth 4",
+     "detail": "197281"
+    },
+    {
+     "ok": true,
+     "name": "perft kiwipete depth 1",
+     "detail": "48"
+    },
+    {
+     "ok": true,
+     "name": "perft kiwipete depth 2",
+     "detail": "2039"
+    },
+    {
+     "ok": true,
+     "name": "perft kiwipete depth 3",
+     "detail": "97862"
+    },
+    {
+     "ok": true,
+     "name": "npm run test",
+     "detail": "1 passed 35 passed"
+    },
+    {
+     "ok": true,
+     "name": "npm run e2e",
+     "detail": "8 passed"
+    },
+    {
+     "ok": true,
+     "name": "npm run build",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "name": "console errors",
+     "detail": "none"
+    },
+    {
+     "ok": true,
+     "name": "no horizontal scroll at 390 px (home)",
+     "detail": "scrollWidth 390"
+    },
+    {
+     "ok": true,
+     "name": "no horizontal scroll at 390 px (fen)",
+     "detail": "scrollWidth 390"
+    },
+    {
+     "ok": true,
+     "name": "no horizontal scroll at 390 px (puzzle)",
+     "detail": "scrollWidth 390"
+    }
+   ],
+   "shots": 20,
+   "files": 11,
+   "plus": 1258,
+   "minus": 3,
+   "playable": true
+  },
+  {
+   "name": "r2-C",
+   "round": 2,
+   "variant": "C",
+   "status": "ok",
+   "models": [
+    "claude-sonnet-5-5"
+   ],
+   "min": 5.9,
+   "usd": 1.08,
+   "parts": [
+    {
+     "step": "build",
+     "model": "sonnet",
+     "min": 4.5,
+     "turns": 48,
+     "usd": 0.78,
+     "denied": 8
+    },
+    {
+     "step": "check",
+     "model": "sonnet",
+     "min": 1.4,
+     "turns": 27,
+     "usd": 0.3,
+     "denied": 6
+    }
+   ],
+   "checks": [
+    {
+     "ok": true,
+     "name": "perft start depth 1",
+     "detail": "20"
+    },
+    {
+     "ok": true,
+     "name": "perft start depth 2",
+     "detail": "400"
+    },
+    {
+     "ok": true,
+     "name": "perft start depth 3",
+     "detail": "8902"
+    },
+    {
+     "ok": true,
+     "name": "perft start depth 4",
+     "detail": "197281"
+    },
+    {
+     "ok": true,
+     "name": "perft kiwipete depth 1",
+     "detail": "48"
+    },
+    {
+     "ok": true,
+     "name": "perft kiwipete depth 2",
+     "detail": "2039"
+    },
+    {
+     "ok": true,
+     "name": "perft kiwipete depth 3",
+     "detail": "97862"
+    },
+    {
+     "ok": true,
+     "name": "npm run test",
+     "detail": "1 passed 21 passed"
+    },
+    {
+     "ok": true,
+     "name": "npm run e2e",
+     "detail": "6 passed"
+    },
+    {
+     "ok": true,
+     "name": "npm run build",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "name": "console errors",
+     "detail": "none"
+    },
+    {
+     "ok": true,
+     "name": "no horizontal scroll at 390 px (home)",
+     "detail": "scrollWidth 390"
+    },
+    {
+     "ok": true,
+     "name": "no horizontal scroll at 390 px (fen)",
+     "detail": "scrollWidth 390"
+    },
+    {
+     "ok": true,
+     "name": "no horizontal scroll at 390 px (puzzle)",
+     "detail": "scrollWidth 390"
+    }
+   ],
+   "shots": 20,
+   "files": 12,
+   "plus": 1196,
+   "minus": 3,
+   "playable": true
+  },
+  {
+   "name": "r2-D",
+   "round": 2,
+   "variant": "D",
+   "status": "ok",
+   "models": [
+    "claude-haiku-5-5",
+    "claude-opus-5-5",
+    "claude-sonnet-5-5"
+   ],
+   "min": 9.0,
+   "usd": 2.62,
+   "parts": [
+    {
+     "step": "build",
+     "model": "opus",
+     "min": 7.5,
+     "turns": 28,
+     "usd": 2.3,
+     "denied": 4
+    },
+    {
+     "step": "check",
+     "model": "sonnet",
+     "min": 1.5,
+     "turns": 33,
+     "usd": 0.32,
+     "denied": 8
+    }
+   ],
+   "checks": [
+    {
+     "ok": true,
+     "name": "perft start depth 1",
+     "detail": "20"
+    },
+    {
+     "ok": true,
+     "name": "perft start depth 2",
+     "detail": "400"
+    },
+    {
+     "ok": true,
+     "name": "perft start depth 3",
+     "detail": "8902"
+    },
+    {
+     "ok": true,
+     "name": "perft start depth 4",
+     "detail": "197281"
+    },
+    {
+     "ok": true,
+     "name": "perft kiwipete depth 1",
+     "detail": "48"
+    },
+    {
+     "ok": true,
+     "name": "perft kiwipete depth 2",
+     "detail": "2039"
+    },
+    {
+     "ok": true,
+     "name": "perft kiwipete depth 3",
+     "detail": "97862"
+    },
+    {
+     "ok": true,
+     "name": "npm run test",
+     "detail": "2 passed 65 passed"
+    },
+    {
+     "ok": true,
+     "name": "npm run e2e",
+     "detail": "7 passed"
+    },
+    {
+     "ok": true,
+     "name": "npm run build",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "name": "console errors",
+     "detail": "none"
+    },
+    {
+     "ok": true,
+     "name": "no horizontal scroll at 390 px (home)",
+     "detail": "scrollWidth 390"
+    },
+    {
+     "ok": true,
+     "name": "no horizontal scroll at 390 px (fen)",
+     "detail": "scrollWidth 390"
+    },
+    {
+     "ok": true,
+     "name": "no horizontal scroll at 390 px (puzzle)",
+     "detail": "scrollWidth 390"
+    }
+   ],
+   "shots": 20,
+   "files": 21,
+   "plus": 2237,
+   "minus": 3,
+   "playable": true
+  },
+  {
+   "name": "r2-E",
+   "round": 2,
+   "variant": "E",
+   "status": "ok",
+   "models": [
+    "claude-sonnet-5-5"
+   ],
+   "min": 4.7,
+   "usd": 0.83,
+   "parts": [
+    {
+     "step": "build",
+     "model": "sonnet",
+     "min": 4.7,
+     "turns": 57,
+     "usd": 0.83,
+     "denied": 9
+    }
+   ],
+   "checks": [
+    {
+     "ok": true,
+     "name": "perft start depth 1",
+     "detail": "20"
+    },
+    {
+     "ok": true,
+     "name": "perft start depth 2",
+     "detail": "400"
+    },
+    {
+     "ok": true,
+     "name": "perft start depth 3",
+     "detail": "8902"
+    },
+    {
+     "ok": true,
+     "name": "perft start depth 4",
+     "detail": "197281"
+    },
+    {
+     "ok": true,
+     "name": "perft kiwipete depth 1",
+     "detail": "48"
+    },
+    {
+     "ok": true,
+     "name": "perft kiwipete depth 2",
+     "detail": "2039"
+    },
+    {
+     "ok": true,
+     "name": "perft kiwipete depth 3",
+     "detail": "97862"
+    },
+    {
+     "ok": true,
+     "name": "npm run test",
+     "detail": "2 passed 42 passed"
+    },
+    {
+     "ok": true,
+     "name": "npm run e2e",
+     "detail": "7 passed"
+    },
+    {
+     "ok": true,
+     "name": "npm run build",
+     "detail": ""
+    },
+    {
+     "ok": true,
+     "name": "console errors",
+     "detail": "none"
+    },
+    {
+     "ok": true,
+     "name": "no horizontal scroll at 390 px (home)",
+     "detail": "scrollWidth 390"
+    },
+    {
+     "ok": true,
+     "name": "no horizontal scroll at 390 px (fen)",
+     "detail": "scrollWidth 390"
+    },
+    {
+     "ok": true,
+     "name": "no horizontal scroll at 390 px (puzzle)",
+     "detail": "scrollWidth 390"
+    }
+   ],
+   "shots": 20,
+   "files": 14,
+   "plus": 1369,
+   "minus": 3,
+   "playable": true
   }
  ]
 }

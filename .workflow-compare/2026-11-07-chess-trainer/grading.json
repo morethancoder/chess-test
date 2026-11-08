@@ -1,0 +1,22 @@
+{
+  "parts": [
+    {
+      "model": "opus",
+      "step": "grade pass 1",
+      "ms": 218000,
+      "transcript": "/Users/alitahseen/.claude/projects/-Users-alitahseen-Demos-chess-test/8b5f7eb5-0f3c-44bd-9986-39ef64ba63bf/subagents/agent-a659147b8ff8864c2.jsonl"
+    },
+    {
+      "model": "opus",
+      "step": "grade pass 2",
+      "ms": 228000,
+      "transcript": "/Users/alitahseen/.claude/projects/-Users-alitahseen-Demos-chess-test/8b5f7eb5-0f3c-44bd-9986-39ef64ba63bf/subagents/agent-acb7f60dc2cd1e415.jsonl"
+    },
+    {
+      "model": "opus",
+      "step": "grade pass 3",
+      "ms": 462000,
+      "transcript": "/Users/alitahseen/.claude/projects/-Users-alitahseen-Demos-chess-test/8b5f7eb5-0f3c-44bd-9986-39ef64ba63bf/subagents/agent-abf87c5a03efe063e.jsonl"
+    }
+  ]
+}

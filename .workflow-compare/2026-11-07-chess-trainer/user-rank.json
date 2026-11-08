@@ -1,0 +1,46 @@
+{
+  "scale": 10,
+  "scores": {
+    "1": 9,
+    "2": 5,
+    "3": 8,
+    "4": 3,
+    "5": 9,
+    "6": 6,
+    "7": 6,
+    "8": 8,
+    "9": 7,
+    "10": 7
+  },
+  "order": [
+    1,
+    5,
+    3,
+    8,
+    10,
+    9,
+    6,
+    7,
+    2,
+    4
+  ],
+  "shown": [
+    4,
+    1,
+    3,
+    10,
+    6,
+    2,
+    9,
+    8,
+    5,
+    7
+  ],
+  "notes": {
+    "1": "loved it however no sounds",
+    "3": "playable not the best art but nice every piece is clear, not the best ui /ux ",
+    "4": "three because it has everything however it looks ugly no motion everything is static and art is ugly",
+    "9": "because of ui"
+  },
+  "saved": "2026-11-08 16:54"
+}

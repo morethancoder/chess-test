@@ -1,0 +1,23 @@
+{
+  "A": {"correctness": 9, "completeness": 10, "code_quality": 8, "visual": 7, "missed": [],
+        "notes": "Clean engine: FEN validation, ep in repetition key only when capturable, mate on 100th half-move wins. Reply timer cleared on reset. Minor: Puzzles tab throws at main.ts:74 if puzzles.json fails to load. Good per-rule tests and e2e. Beats Y on code quality for broader e2e (retry, black promotion, drag). Visual plain: blue-grey dark board, mate text repeated."},
+  "B": {"correctness": 7, "completeness": 10, "code_quality": 6, "visual": 6, "missed": [],
+        "notes": "Rules correct. Minor race: reply setTimeout at main.ts:138 never cancelled; Restart/Next/mode switch within 450 ms runs state.step += 1 on the new puzzle (sub-second, rare). No research note. Visual plainest of the set: bare panel, redundant checkmate text, small desktop promotion picker. Ranks below X/Z on visual and polish."},
+  "C": {"correctness": 4, "completeness": 9, "code_quality": 7, "visual": 6, "missed": [1],
+        "notes": "Real bug: startGame (main.ts:36-49) never resets solved (only startPuzzle does, main.ts:57); canInteract (main.ts:82) requires !solved, so after solving any puzzle the Two players board and New game are locked. Normal users hit this, breaking pass-and-play. Also uncleared reply timer at main.ts:130. Visual: checkmate text shown three times, duplicated New game."},
+  "D": {"correctness": 10, "completeness": 10, "code_quality": 8, "visual": 9, "missed": [],
+        "notes": "No bugs found. Puzzle accepts any move that still forces mate (forcesMate/defenderLost), the smartest puzzle logic here; cancelReply on every mode change, pending reply flushed on pointerdown. SAN move list, keyboard, overlays with View board. Only 27 unit tests (one per rule) keeps code_quality below F. Wins over F on correctness of puzzle handling."},
+  "E": {"correctness": 9, "completeness": 10, "code_quality": 9, "visual": 8, "missed": [],
+        "notes": "Modular Int8Array engine with make/unmake, 65 unit tests. Wrong move played then undone; reply timer cleared. History via pushState/popstate, game-over modal, promotion Cancel. Minor: empty puzzle list would crash; Next disabled on puzzle 12. Ties G on correctness but beats it on tests (7 e2e vs 4)."},
+  "F": {"correctness": 9, "completeness": 10, "code_quality": 9, "visual": 9, "missed": [],
+        "notes": "No bugs found. Position class with make/unmake and legal-move cache; defender reply is immediate so no timer race. 53 unit and 15 e2e tests, the strongest suite. Polished blurred-backdrop overlays, puzzle grid, Hint. Scored 9 on correctness only because its puzzle checking is less forgiving than D's forced-mate acceptance; very close runner-up."},
+  "G": {"correctness": 9, "completeness": 10, "code_quality": 8, "visual": 8, "missed": [],
+        "notes": "No bugs found. Modular engine, 69 unit tests, but only 4 e2e (fewest). Wrong move flashed and undone after 700 ms; clearTimers on new game and puzzle open; any mating move accepted. New game restarts from ?fen start, acceptable. Polished amber theme with overlays and move list. Below E on code_quality due to thin e2e."},
+  "X": {"correctness": 7, "completeness": 10, "code_quality": 7, "visual": 7, "missed": [],
+        "notes": "Clean 345-line engine, wrong move flagged without being played. Minor race: async wait(450) reply at main.ts:134-146 never cancelled; switching puzzle within 450 ms runs solIdx++ and can mark the new puzzle solved (sub-second, rare). 21 unit, 6 e2e incl. retry and stalemate. Neat overlays both themes. Beats Z on code_quality: more thorough e2e."},
+  "Y": {"correctness": 9, "completeness": 10, "code_quality": 7, "visual": 7, "missed": [],
+        "notes": "No bugs found. Game class with insufficient material; replyTimer cleared in startPlay and openPuzzle. Strong targeted tests (castling through check, b1-only attack, 100th half-move mate) and 8 e2e, but only 27 unit. Visual clean but desktop layout hugs the left with half the viewport empty. Below A on code_quality: fewer unit tests."},
+  "Z": {"correctness": 7, "completeness": 10, "code_quality": 6, "visual": 7, "missed": [],
+        "notes": "Minor race: reply setTimeout at main.ts:150-159 not cleared; switching within 550 ms runs step++ on the new puzzle, marking a mate-in-1 solved with no move (sub-second). Puzzles tab always reopens puzzle 1 (main.ts:349). Game.play has no legality check; relies on callers. 35 unit, 5 e2e. Phone header layout shifts between modes. Below X on code_quality for thinner e2e."},
+  "winner": "D"
+}

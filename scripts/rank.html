@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Rate the Builds</title>
+<style>
+:root{
+  --bg:#F4F4F4; --surface:#FFFFFF; --surface-2:#EAEAEA;
+  --text:#0A0A0A; --muted:#666666; --faint:#B5B5B5;
+  --card-shadow:0 18px 40px rgba(0,0,0,.05); --pop-shadow:0 24px 60px rgba(0,0,0,.14);
+  --yellow:#FFE600; --cyan:#00E5FF; --red:#FF2A2A;
+  --bdg-y-bg:rgba(255,230,0,.6); --bdg-y-fg:#000; --bdg-c-bg:rgba(0,229,255,.32); --bdg-c-fg:#000;
+  --bdg-r-bg:rgba(255,42,42,.14); --bdg-r-fg:#D00000; --bdg-m-bg:rgba(0,0,0,.06); --bdg-m-fg:#333;
+  --drop:rgba(255,230,0,.28); --focus-ring:0 0 0 2px rgba(0,0,0,.35);
+  --r-lg:14px; --r-md:10px; --r-sm:7px;
+  --display:-apple-system,BlinkMacSystemFont,"SF Pro Display","SF Pro Text","Inter Tight","Helvetica Neue",Arial,sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#050505; --surface:#121212; --surface-2:#1E1E1E;
+  --text:#FFFFFF; --muted:#8E8E93; --faint:#48484A;
+  --card-shadow:none; --pop-shadow:0 24px 60px rgba(0,0,0,.6);
+  --bdg-y-bg:rgba(255,230,0,.15); --bdg-y-fg:#FFE600; --bdg-c-bg:rgba(0,229,255,.14); --bdg-c-fg:#00E5FF;
+  --bdg-r-bg:rgba(255,42,42,.16); --bdg-r-fg:#FF4B4B; --bdg-m-bg:rgba(255,255,255,.08); --bdg-m-fg:#D6D6D6;
+  --drop:rgba(255,230,0,.10); --focus-ring:0 0 0 2px rgba(255,255,255,.4); color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#050505; --surface:#121212; --surface-2:#1E1E1E;
+  --text:#FFFFFF; --muted:#8E8E93; --faint:#48484A;
+  --card-shadow:none; --pop-shadow:0 24px 60px rgba(0,0,0,.6);
+  --bdg-y-bg:rgba(255,230,0,.15); --bdg-y-fg:#FFE600; --bdg-c-bg:rgba(0,229,255,.14); --bdg-c-fg:#00E5FF;
+  --bdg-r-bg:rgba(255,42,42,.16); --bdg-r-fg:#FF4B4B; --bdg-m-bg:rgba(255,255,255,.08); --bdg-m-fg:#D6D6D6;
+  --drop:rgba(255,230,0,.10); --focus-ring:0 0 0 2px rgba(255,255,255,.4); color-scheme:dark}
+*{box-sizing:border-box}
+body{margin:0; background:var(--bg); color:var(--text); font-family:var(--display); font-size:16px; line-height:1.5; -webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px; margin:0 auto; padding:0 16px 80px}
+header{position:sticky; top:0; z-index:5; background:var(--bg); padding:18px 0 14px; display:flex; gap:16px; align-items:center; flex-wrap:wrap}
+h1{font-size:clamp(26px,4vw,38px); line-height:1.05; letter-spacing:-.02em; margin:0; flex:1 1 320px}
+.lead{color:var(--muted); margin:4px 0 20px; max-width:70ch}
+.btn{font:inherit; font-size:14px; font-weight:600; border:0; border-radius:999px; padding:9px 16px; cursor:pointer; background:var(--surface-2); color:var(--text); text-decoration:none; display:inline-flex; align-items:center; gap:6px; min-height:40px}
+.btn-solid{background:var(--text); color:var(--bg)}
+.btn:focus-visible,.icon:focus-visible,textarea:focus-visible{outline:none; box-shadow:var(--focus-ring)}
+.icon{border:0; background:var(--surface-2); color:var(--text); width:40px; height:40px; border-radius:999px; cursor:pointer; font-size:18px; line-height:1}
+.icon:disabled{opacity:.35; cursor:default}
+.badge{font-size:13px; font-weight:600; padding:3px 10px; border-radius:999px; background:var(--bdg-m-bg); color:var(--bdg-m-fg); white-space:nowrap}
+.badge.ok{background:var(--bdg-c-bg); color:var(--bdg-c-fg)} .badge.bad{background:var(--bdg-r-bg); color:var(--bdg-r-fg)}
+ol{list-style:none; margin:0; padding:0; display:grid; gap:14px}
+li{background:var(--surface); border-radius:var(--r-lg); box-shadow:var(--card-shadow); padding:16px; display:grid; grid-template-columns:1fr auto; gap:12px 16px; align-items:start}
+li > *{min-width:0}
+.score{font-size:40px; font-weight:800; font-variant-numeric:tabular-nums; letter-spacing:-.03em; line-height:1; text-align:right; white-space:nowrap}
+.score small{font-size:16px; font-weight:600; color:var(--muted); letter-spacing:0}
+.score.none{color:var(--faint)}
+.rate{grid-column:1/-1; display:grid; gap:6px; grid-template-columns:repeat(var(--n),minmax(0,1fr))}
+.rate button{font:inherit; font-size:15px; font-weight:700; font-variant-numeric:tabular-nums; border:0; border-radius:999px; min-height:40px; cursor:pointer; background:var(--surface-2); color:var(--text)}
+.rate button[aria-checked="true"]{background:var(--yellow); color:#000}
+.rate button:focus-visible,.seg button:focus-visible{outline:none; box-shadow:var(--focus-ring)}
+.seg{display:inline-flex; background:var(--surface-2); border-radius:999px; padding:3px; gap:2px}
+.seg button{font:inherit; font-size:13px; font-weight:600; border:0; border-radius:999px; padding:6px 12px; cursor:pointer; background:transparent; color:var(--muted)}
+.seg button[aria-pressed="true"]{background:var(--surface); color:var(--text)}
+.name{font-weight:700; font-size:19px; margin:0 0 8px}
+.thumbs{display:flex; gap:8px; overflow-x:auto; padding-bottom:4px}
+.thumbs img{height:150px; width:auto; border-radius:var(--r-sm); cursor:zoom-in; background:var(--surface-2); flex:none}
+.all{display:none; grid-column:1/-1; gap:8px; grid-template-columns:repeat(auto-fill,minmax(150px,1fr))}
+li.open .all{display:grid}
+.all figure{margin:0} .all img{width:100%; border-radius:var(--r-sm); cursor:zoom-in; display:block}
+.all figcaption{font-size:12px; color:var(--muted)}
+.row{display:flex; gap:8px; flex-wrap:wrap; margin-top:10px}
+textarea{grid-column:1/-1; font:inherit; font-size:14px; width:100%; min-height:40px; resize:vertical; border:0; border-radius:var(--r-md); background:var(--surface-2); color:var(--text); padding:9px 12px}
+dialog{border:0; padding:0; background:transparent; max-width:96vw; max-height:94vh}
+dialog::backdrop{background:rgba(0,0,0,.8)}
+dialog img{max-width:96vw; max-height:94vh; display:block; border-radius:var(--r-md)}
+@media (max-width:640px){
+  li{grid-template-columns:1fr auto} .score{font-size:32px}
+  .rate{grid-template-columns:repeat(5,minmax(0,1fr))}
+  .thumbs img{height:120px}
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>Rate the ten builds</h1>
+    <div class="seg" role="group" aria-label="Rating scale"><button data-scale="10">Out of 10</button><button data-scale="5">Out of 5</button></div>
+    <span class="badge" id="status">Not saved</span>
+    <button class="btn btn-solid" id="save">Save ratings</button>
+  </header>
+  <p class="lead">Rate each build on its own. The cards are in a random order, picked once for you, and the numbers say nothing about how a build was made. Play each one in its own tab, open all 20 shots, and leave a note if something decides it for you. Changing the scale converts the ratings you already gave.</p>
+  <ol id="list"></ol>
+</div>
+<dialog id="lb"></dialog>
+<script>
+const SHOTS = ['start','midgame','solved','promotion','mate'];
+const KEY = 'chess-rate-draft';
+let order = [], scores = {}, notes = {}, scale = 10;
+const $ = (s, el = document) => el.querySelector(s);
+const list = $('#list'), status = $('#status');
+const store = { get(){ try { return JSON.parse(localStorage.getItem(KEY) || 'null'); } catch { return null; } },
+                set(v){ try { localStorage.setItem(KEY, JSON.stringify(v)); } catch {} } };
+function setStatus(text, kind){ status.textContent = text; status.className = 'badge' + (kind ? ' ' + kind : ''); }
+const rated = () => order.filter(n => scores[n]).length;
+function dirty(){ store.set({ order, scores, notes, scale }); setStatus(`Not saved · ${rated()} of ${order.length} rated`); }
+const src = (n, s, w, t) => `${n}/shots/${s}-${w}-${t}.png`;
+function img(n, s, w, t){ return `<img src="${src(n,s,w,t)}" alt="Build ${n}, ${s} at ${w} px, ${t}" data-full="${src(n,s,w,t)}">`; }
+function shuffle(a){ a = a.slice(); for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; } return a; }
+function scoreHtml(n){ return scores[n] ? `${scores[n]}<small>/${scale}</small>` : `–<small>/${scale}</small>`; }
+
+function render(){
+  document.querySelectorAll('[data-scale]').forEach(b => b.setAttribute('aria-pressed', String(+b.dataset.scale === scale)));
+  list.innerHTML = '';
+  order.forEach(n => {
+    const li = document.createElement('li');
+    li.dataset.n = n;
+    const all = SHOTS.flatMap(s => ['390','1280'].flatMap(w => ['light','dark'].map(t =>
+      `<figure>${img(n,s,w,t)}<figcaption>${s}, ${w} px, ${t}</figcaption></figure>`))).join('');
+    const btns = Array.from({ length: scale }, (_, i) => i + 1).map(v =>
+      `<button role="radio" aria-checked="${scores[n] === v}" aria-label="${v} out of ${scale}" data-v="${v}">${v}</button>`).join('');
+    li.innerHTML = `
+      <div>
+        <p class="name">Build ${n}</p>
+        <div class="thumbs">${img(n,'midgame','390','light')}${img(n,'solved','390','dark')}${img(n,'midgame','1280','light')}${img(n,'mate','1280','dark')}${img(n,'promotion','1280','light')}</div>
+        <div class="row">
+          <a class="btn btn-solid" href="${n}/app/index.html" target="_blank" rel="noopener">Play build ${n}</a>
+          <button class="btn" data-act="all">All 20 shots</button>
+        </div>
+      </div>
+      <div class="score${scores[n] ? '' : ' none'}" aria-live="polite">${scoreHtml(n)}</div>
+      <div class="rate" role="radiogroup" aria-label="Rating for build ${n}" style="--n:${scale}">${btns}</div>
+      <div class="all">${all}</div>
+      <textarea placeholder="Note on build ${n} (optional)" aria-label="Note on build ${n}">${notes[n] || ''}</textarea>`;
+    list.appendChild(li);
+  });
+}
+
+list.addEventListener('click', e => {
+  const li = e.target.closest('li'); if (!li) return;
+  const n = +li.dataset.n, v = e.target.closest('[data-v]')?.dataset.v;
+  if (v) {
+    scores[n] = +v; dirty();
+    li.querySelectorAll('[data-v]').forEach(b => b.setAttribute('aria-checked', String(+b.dataset.v === +v)));
+    const sc = li.querySelector('.score'); sc.innerHTML = scoreHtml(n); sc.classList.remove('none');
+  } else if (e.target.closest('[data-act=all]')) li.classList.toggle('open');
+  else if (e.target.dataset.full) { const big = new Image(); big.src = e.target.dataset.full; big.alt = e.target.alt; $('#lb').replaceChildren(big); $('#lb').showModal(); }
+});
+$('#lb').addEventListener('click', () => $('#lb').close());
+list.addEventListener('input', e => { if (e.target.tagName === 'TEXTAREA') { notes[e.target.closest('li').dataset.n] = e.target.value; dirty(); } });
+document.querySelector('.seg').addEventListener('click', e => {
+  const s = +e.target.dataset.scale; if (!s || s === scale) return;
+  for (const n in scores) scores[n] = s === 5 ? Math.ceil(scores[n] / 2) : scores[n] * 2;
+  scale = s; dirty(); render();
+});
+
+$('#save').addEventListener('click', async () => {
+  if (rated() < order.length) return setStatus(`Not saved: rate all ${order.length} (${rated()} done)`, 'bad');
+  setStatus('Saving');
+  try {
+    const r = await fetch('/save', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ scores, scale, shown: order, notes }) });
+    const j = await r.json();
+    j.ok ? setStatus('Saved ' + j.saved, 'ok') : setStatus('Not saved: ' + j.error, 'bad');
+  } catch (err) { setStatus('Not saved: server stopped', 'bad'); }
+});
+
+fetch('labels.json').then(r => r.json()).then(labels => {
+  const d = store.get();
+  const same = d && Array.isArray(d.order) && [...d.order].sort((a,b)=>a-b).join() === [...labels].sort((a,b)=>a-b).join();
+  order = same ? d.order : shuffle(labels);
+  if (same) { scores = d.scores || {}; notes = d.notes || {}; scale = d.scale === 5 ? 5 : 10; }
+  render(); dirty();
+});
+</script>
+</body>
+</html>

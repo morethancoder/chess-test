@@ -2,7 +2,7 @@
 # never see this file. Plan: ~/.claude/skills/workflow-compare/plans/chess-trainer.md
 
 .DEFAULT_GOAL := help
-.PHONY: help doctor setup puzzles launch checks shots round dry price report clean
+.PHONY: help doctor setup puzzles launch checks shots round dry price report grade rank clean
 
 help: ## show this help
 	@awk 'BEGIN {FS = ":.*?## "; printf "\n\033[1mUsage:\033[0m make \033[36m<target>\033[0m\n\n\033[1mTargets:\033[0m\n"} \
@@ -38,6 +38,12 @@ price: ## billed price of every build so far, with cross-checks
 
 report: ## gather builds, shots and numbers for the report artifact: make report [r=1]
 	@r=$(r) bash scripts/report.sh
+
+grade: ## pack the blind grading passes (fresh labels, shots, sheets, leak check): make grade [pass=3]
+	@pass=$(pass) bash scripts/grade.sh
+
+rank: ## your blind rating page on 127.0.0.1:5300, saves user-rank.json: make rank [fresh=1]
+	@fresh=$(fresh) bash scripts/rank.sh
 
 clean: ## remove build output and test results
 	@bash scripts/clean.sh

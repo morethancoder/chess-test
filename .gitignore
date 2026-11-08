@@ -32,3 +32,9 @@ playwright-report/
 .venv/
 .env
 .workflow-compare/*/stub/
+.impeccable/
+__pycache__/
+# blind grading packs: keep only each pass's grades.json (packs are copies of shots and diffs)
+.workflow-compare/*/blind-*/*
+!.workflow-compare/*/blind-*/grades.json
+.workflow-compare/*/rank/
