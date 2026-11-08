@@ -44,6 +44,42 @@ for name in sorted(os.listdir(run)):
                    "usd": round(sum(p["usd"] for p in parts), 2), "parts": parts, "checks": checks,
                    "shots": shots_ok, "files": files, "plus": plus, "minus": minus, "playable": has_build})
 
+# Ratings, once grading and the owner's rating are done: blind/grades.json (median of the Opus
+# passes, labels already mapped back) and user-rank.json (owner's blind 1-10, mapped back via
+# .mapping-user.json). Per-pass notes come from blind-<n>/grades.json through .mapping-<n>.json.
+LINES = ("correctness", "completeness", "code_quality", "visual")
+gp, up = os.path.join(run, "blind", "grades.json"), os.path.join(run, "user-rank.json")
+if os.path.exists(gp):
+    g = json.load(open(gp))
+    passes = []
+    for n in (1, 2, 3):
+        pp = os.path.join(run, f"blind-{n}", "grades.json")
+        if os.path.exists(pp):
+            m = json.load(open(os.path.join(run, f".mapping-{n}.json")))
+            pg = json.load(open(pp))
+            passes.append({m[k]: v for k, v in pg.items() if k in m} | {"_winner": m.get(pg.get("winner"), "")})
+    for b in builds:
+        e = g.get(b["name"])
+        if e:
+            b["grader"] = {k: e[k] for k in LINES} | {"total": sum(e[k] for k in LINES), "missed": e.get("missed", []),
+                          "passes": [{k: p[b["name"]][k] for k in LINES} | {"notes": p[b["name"]]["notes"]} for p in passes]}
+    grader_winners = [p["_winner"] for p in passes]
+else:
+    grader_winners = []
+if os.path.exists(up):
+    u = json.load(open(up))
+    m = json.load(open(os.path.join(run, ".mapping-user.json")))
+    for b in builds:
+        n = next((k for k, v in m.items() if v == b["name"]), None)
+        if n and n in u["scores"]:
+            b["user"] = {"score": u["scores"][n], "scale": u["scale"], "note": u["notes"].get(n, "")}
+gj = os.path.join(run, "grading.json")
+grading_usd = 0.0
+if os.path.exists(gj):
+    sys.path.insert(0, os.path.expanduser("~/.claude/skills/workflow-compare/scripts"))
+    from pricing import price  # noqa: E402
+    grading_usd = round(price([p["transcript"] for p in json.load(open(gj))["parts"]])["usd"], 2)
+
 os.makedirs(out, exist_ok=True)
-json.dump({"builds": builds}, open(os.path.join(out, "data.json"), "w"), indent=1)
+json.dump({"builds": builds, "grader_winners": grader_winners, "grading_usd": grading_usd}, open(os.path.join(out, "data.json"), "w"), indent=1)
 print(f"{len(builds)} builds → {out}/data.json")
