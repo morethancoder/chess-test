@@ -333,6 +333,19 @@ dialog.dlg[open]{animation:pop .3s var(--ease)}
 .js .rise{opacity:0; transform:translateY(24px); transition:opacity .9s var(--ease), transform .9s var(--ease)}
 .js .rise.is-in{opacity:1; transform:none}
 
+/* camera corner: the top-right 320 x 320 px of the screen stays plain page background for the
+   owner's face-cam cutout when recording. Desktop widths only. */
+.cam-corner{display:none}
+@media (min-width:900px){
+  .cam-corner{display:block; position:fixed; top:0; right:0; width:320px; height:320px; background:var(--bg); z-index:20; pointer-events:none}
+  .top{padding-right:336px}
+  :root{--cam-pad:clamp(0px, calc(336px - (100vw - 1320px) / 2), 320px)}
+  .hero,.sec-head{padding-right:var(--cam-pad)}
+  .hero .kpis{align-self:flex-start; width:calc(100% + var(--cam-pad))}
+  dialog.dlg{margin-left:16px; max-width:min(1200px, calc(100vw - 368px))}
+  dialog.dlg::backdrop{background:linear-gradient(var(--bg),var(--bg)) top right / 320px 320px no-repeat, var(--scrim)}
+}
+
 @media (max-width:1180px){
   .row-main{grid-template-columns:2em 112px minmax(0,1fr) minmax(0,1fr) 5em auto; row-gap:12px}
   .rthumb{width:112px}
@@ -387,6 +400,7 @@ dialog.dlg[open]{animation:pop .3s var(--ease)}
 }
 </style>
 
+<div class="cam-corner" aria-hidden="true"></div>
 <header class="top">
   <div class="top-in">
     <a class="at" href="#top" aria-label="Back to top">AT</a>
